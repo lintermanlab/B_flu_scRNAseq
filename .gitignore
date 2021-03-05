@@ -1,0 +1,21 @@
+.Rproj.user
+.Rproj
+.Rhistory
+.Ruserdata
+
+# A selection of large files to exclude from git:
+SCE_incl_NTC.RData
+SCE_QC_pass.RData
+DiffusionMap.RData
+Rsubread_counts.RData
+# A selection of big directories to exclude from git:
+/Turner_dataset_reanalysis/cellranger/
+/Turner_dataset_reanalysis/seurat_objects/
+# Immcantation results to exclude from git (they are remade by the Rmd):
+/Turner_dataset_reanalysis/*.tsv
+/Turner_dataset_reanalysis/*.fmt7
+/Turner_dataset_reanalysis/*.csv
+/Turner_dataset_reanalysis/*.fasta
+/Turner_dataset_reanalysis/*.RData
+
+B_flu_scRNAseq.Rproj
