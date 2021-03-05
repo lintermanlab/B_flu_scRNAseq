@@ -1,6 +1,6 @@
 ## Package outline
 
-This code supports the manuscript Carr et al.
+This code supports the manuscript Carr et al. BioRxiv 2021 https://biorxiv.org/cgi/content/short/2021.03.04.433942v1
 
 This repository was created using RStudio and github version control.
 
