@@ -21,7 +21,7 @@ This contains Rmarkdown files for:
 - Differential expression and differential abundance analyses
 - Diffusion Map generation
 
-The `data` sub-directory contains the output from these Rmd file. Some of these files are too large to host on github. The final 'SingleCellExperiment' object is available.
+The `data` sub-directory contains the output from these Rmd file. Some of these files are too large to host on github. The final `SingleCellExperiment` object is available.
 
 
 ### Turner dataset reanalysis directory
