@@ -26,7 +26,7 @@ The `data` sub-directory contains the output from these Rmd file. Some of these 
 
 ### Turner dataset reanalysis directory
 
-The Turner et al. dataset is described in _Nature_ 2020 https://www.nature.com/articles/s41586-020-2711-0, and available from GEO accession GSE148633 http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE148633.
+The Turner _et al._ dataset is described in _Nature_ 2020 https://www.nature.com/articles/s41586-020-2711-0, and available from GEO accession GSE148633 http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE148633.
 
 This contains Rmarkdown files for:
 
