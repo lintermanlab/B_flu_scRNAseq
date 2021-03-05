@@ -1,0 +1,241 @@
+---
+title: "SCE assembly for the 2016-17 cohort"
+author: "EJC"
+date: "25/06/2020, based on code from May 2019"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+The Babraham compute cluster does not contain a global tex installation, so a local tex is added to $PATH to allow knitting to pdf.
+
+```{r}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = T, tidy = T, warning = F, message = T, fig.width = 7, fig.height = 4.5, tidy.opts=list(width.cutoff=60))
+```
+
+# Load Rsubread counts
+
+```{r get_counts}
+load(file = "data/Rsubread_counts.RData")
+```
+
+# SingleCellExperiment sample annotation
+
+## Simple annotation from the bam filename
+
+```{r SCE_sample_annotation}
+
+# Some basic info is stored in the bam filename,
+# which becomes the colname of the Rsubread count matrix:
+
+library(dplyr)
+
+annotation <- colnames(counts$counts) %>%
+  # Remove the end of the bam filename:
+  gsub(., pattern = ".L001.*.", replacement = "") %>%
+  # Split into separate strings based on the '.'
+  sapply(.,strsplit,split ="\\.") %>%
+  # Make a dataframe
+  as.data.frame(.) %>%
+  # Re-orientate so samples are rows
+  t(.) %>%
+  # Keep the first 7 columns
+  .[,1:7] %>%
+  # Ensure a dataframe
+  as.data.frame(.)
+
+colnames(annotation) <- c("lane", "i5", "i7", "lib_plate", "lib_well", "PID", "day")
+rownames(annotation) <- colnames(counts$counts)
+annotation$short.name <- rownames(annotation)
+
+
+#### Fix some formatting
+# 1 plate is called 'lib' rest are 'cDNA'
+annotation$lib_plate <- annotation$lib_plate %>%
+  as.character(.) %>%
+  gsub(pattern = "lib", replacement = "cDNA", .) %>% 
+  factor(.)
+
+```
+
+## Index sort information
+
+```{r parse_index_sort_info}
+##### Add in the index sort data
+## Read in the CSV
+# This includes age
+index.flow <- read.csv(file = "ALFNA16_indexed_scB_flow_with_lib_wells_from_flowsinglecell.csv", row.names = 1)
+
+
+# number of rows is the total number of index sorted cells.
+## We sorted slightly more cells than were sequenced.
+dim(index.flow) 
+
+# change the lib_plate factor so it shares levels with the corresponding factor in the 'annotation' object:
+index.flow$lib_plate <- index.flow$lib.name  %>%
+  as.character(.) %>%
+  gsub(pattern = "lib", replacement = "cDNA", .) %>% 
+  factor(.)
+
+# Remove the old factor:
+index.flow <- index.flow [, ! colnames(index.flow) %in% c( "lib.name" )]
+
+# Change column names:
+colnames(index.flow) <-  gsub(colnames(index.flow), pattern = "sampleID", replacement = "PID") # sampleID -> PID
+colnames(index.flow) <-  gsub(colnames(index.flow), pattern = "age.group", replacement = "age") # age
+colnames(index.flow) <-  gsub(colnames(index.flow), pattern = "lib.well", replacement = "lib_well") # lib_well
+colnames(index.flow) <-  gsub(colnames(index.flow), pattern = "^name", replacement = "fcs_name") # fcs filename
+
+# Change the fluorescence columns to shorter names
+# They all end with nm.A (and nothing else does)
+# they have 15 characters of filters + lasers that clutters plots:
+
+colnames(index.flow)[grepl(colnames(index.flow), pattern = "nm.A$")] <- colnames(index.flow)[grepl(colnames(index.flow), pattern = "nm.A$")] %>%
+  substr(., 1, stop = nchar(.) - 15) %>%
+  gsub(., pattern = "_515.30", replacement = "")
+
+# Make 'day' formatting and class [factor] the same:
+index.flow$day <- factor(paste0("d",as.character(index.flow$day)))
+
+# remove XLoc + YLoc columns (these are duplicated in the fcs.XLoc / fcs.YLoc columns)
+# XLoc / YLoc on their own could refer to the library well or the fcs well.
+# Remove now to minimise this risk of confusion.
+index.flow <- index.flow[ ,! colnames(index.flow) %in% c("XLoc", "YLoc")]
+
+```
+
+## Identify empty [NTC] wells
+
+These are excluded at blind QC steps, but it is important to highlight their existence by design. Their presence in QC step skews calculations of median & MAD, so other cells also fail.
+
+```{r join_index_sort_info_with_sample_annotation}
+
+# Do left_join.
+index.annot <- dplyr::left_join(annotation, index.flow, by.x = c("PID", "day","lib_plate", "lib_well"), by.y = c("PID", "day","lib_plate", "lib_well"), all.x = T, all.y = F)
+
+all(index.annot$short.name == annotation$short.name) # this should be true.
+
+```
+
+```{r identify_NTC_wells}
+## This is important.
+# There are 8 NTC wells.
+# (in submitting the sequencing to Sierra [our sequencing pipeline manager], I gave 96 index combinations and labelled by nearest PID/day. This gives bam files implying a PID)# 
+
+summary(index.annot$age) # there are 8 empty library wells, which have 'NA' as age.
+
+# Set the PID and day for these wells to NA to reflect their NTC status
+
+index.annot[ is.na(index.annot$age), ]$PID <- NA
+index.annot[ is.na(index.annot$age), ]$day <- NA
+
+```
+
+# SCE building
+
+```{r SCE_construction}
+
+
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+
+sce <- SingleCellExperiment(assays=list(counts=counts$counts), colData = index.annot)
+
+
+```
+
+# SCE transcript labelling
+
+```{r SCE_mito}
+library(AnnotationHub)
+library(ensembldb)
+ens.hs.v38.87 <- AnnotationHub()[["AH53321"]]
+txdb <- makeTxDbFromGRanges(ens.hs.v38.87)
+
+# Retrieve chromosomal locations of each transcript:
+location <- mapIds(txdb, keys=rownames(sce),
+    keytype="GENEID", column="TXCHROM")
+is.mito <- which(location=="MT")
+
+
+# Handy to save the is.mito object alongside the SCE
+save(sce, is.mito, file = "data/SCE_incl_NTC.RData")
+```
+
+# SCE quality control
+
+```{r qc, fig.height=10}
+
+load("data/SCE_incl_NTC.RData")
+# Remove the known NTC wells
+# these wells already have low counts/features so would get excluded anyway
+# but they skew MAD calculations, so affect which 'borderline' cells are also excluded.
+sce <- sce[ , !is.na(sce$PID) ]
+
+# Calculate QC stats:
+qcstats <- perCellQCMetrics(sce, subsets=list(Mito=is.mito))
+
+# Define the groups WITHIN which to determine median and 3xMADs: 
+sce$phenotype <- paste(sce$age, sce$day, sep =" ")
+# Identify QC fails:
+batch.4grp.reasons <- quickPerCellQC(qcstats, percent_subsets=c("subsets_Mito_percent","percent_top_50"), batch=sce$phenotype)
+
+
+# Table to explain QC fail distribution:
+colSums(as.matrix(batch.4grp.reasons))
+
+# Now to plot the QC metrics, highlighting pass/fails:
+
+sce <- addPerCellQC(sce, subsets=list(Mito=is.mito))
+sce$qc_fail <- batch.4grp.reasons$discard
+
+# Replace the long, full text 'lib_plate' with A-J:
+sce$library <- LETTERS[1:10][sce$lib_plate]
+
+cowplot::plot_grid(
+    plotColData(sce, x="library", y="sum", colour_by="qc_fail",
+        other_fields="phenotype") + facet_wrap(~phenotype) + 
+        scale_y_log10(),
+    plotColData(sce, x="library", y="detected", colour_by="qc_fail", 
+        other_fields="phenotype") + facet_wrap(~phenotype) + 
+        scale_y_log10(),
+    plotColData(sce, x="library", y="subsets_Mito_percent", 
+        colour_by="qc_fail", other_fields="phenotype") + 
+        facet_wrap(~phenotype),
+    plotColData(sce, x="library", y="percent_top_50", 
+        colour_by="qc_fail", other_fields="phenotype") + 
+        facet_wrap(~phenotype),
+       labels = "AUTO",align = "hv", vjust = 1,
+    ncol=1
+)
+
+```
+
+# Save final SCE: NTC removed, QC passing cells
+
+```{r}
+
+sce <- sce[ , ! sce$qc_fail]
+
+save(sce, file = "data/SCE_QC_pass.RData")
+
+```
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

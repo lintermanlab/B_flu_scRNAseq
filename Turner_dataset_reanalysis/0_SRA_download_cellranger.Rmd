@@ -1,0 +1,78 @@
+---
+title: "FNA transcriptomics"
+author: "Ed Carr, Linterman lab"
+date: "8 Dec 2020"
+output: 
+  pdf_document: 
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+# Example code
+
+Example code collected from orignal bash scripts, are shown for single samples.
+
+cellranger v 5.0.0.
+
+Reference files from 10x Genomics:
+- refdata-cellranger-GRCh38-1.2.0 (transcriptome)
+- refdata-cellranger-vdj-GRCh38-alts-ensembl-5.0.0 (vdj)
+
+Seurat import onwards in later Rmd files.
+
+## 1. Download the scRNAseq and Ig BCR libraries from SRA
+
+```{bash example_code_to_download_from_SRA, echo = TRUE, eval = F}
+
+## From http://SRAexplorer.info
+
+#!/bin/bash
+curl -L ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR112/056/SRR11233656/SRR11233656_1.fastq.gz -o SRR11233656_scRNA-seq_of_Homo_sapiens_adult_male_FNA_from_lymph_node_d0_1.fastq.gz &
+curl -L ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR112/056/SRR11233656/SRR11233656_2.fastq.gz -o SRR11233656_scRNA-seq_of_Homo_sapiens_adult_male_FNA_from_lymph_node_d0_2.fastq.gz
+
+## All transcriptomic fq moved into a directory called 'fq_dir'
+
+## All vdj fq moved into a directory called 'vdj_fqdir'.
+```
+
+## 2. Transcriptomic fq counting
+
+```{bash cellranger_counting, echo=TRUE, eval=FALSE}
+
+module load cellranger
+
+cellranger count --id TurnerSRR11233645 --fastqs fq_dir --sample SRR11233645_scRNA-seq_of_Homo_sapiens_adult_male_FNA_from_lymph_node_d60 --transcriptome /bi/scratch/Genomes/10x/human/refdata-cellranger-GRCh38-1.2.0
+
+
+```
+
+## 3. VDJ fq cellranger
+
+```{bash cellranger_vdj, echo = TRUE, eval = FALSE}
+
+module load cellranger
+
+cellranger vdj --id Turner_VDJ_SRR11233622 --fastqs vdj_fqdir --sample SRR11233622_single_cell_VDJ_of_Homo_sapiens_adult_male_FNA_from_lymph_node_d60 --reference /bi/home/carre/refdata-cellranger-vdj-GRCh38-alts-ensembl-5.0.0
+
+```
+
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

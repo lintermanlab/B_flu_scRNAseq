@@ -1,0 +1,285 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 8, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r fna_B_cell_umap, warning=FALSE, message=FALSE, results='hide'}
+
+library(Seurat)
+library(ggpubr)
+
+load("../Turner_dataset_reanalysis/seurat_objects/1_FNA_transcriptomes_AnchorIntegrated_just_B_cells.RData")
+
+DefaultAssay(fna.B) <- "integrated" # set explicitly, so we re-cluster on integrated anchors.
+
+# Run the standard workflow for visualization and clustering
+fna.B <- ScaleData(fna.B, verbose = FALSE)
+fna.B <- RunPCA(fna.B, npcs = 20, verbose = FALSE)
+
+fna.B <- FindNeighbors(fna.B, dims = 1:20)
+fna.B <- FindClusters(fna.B, resolution = 0.05) # Turner used 0.2, for this integration approach 0.05 gives biologically relevant clusters.
+
+fna.B <- RunUMAP(fna.B, reduction = "pca", dims = 1:20)
+
+#b1 <- DimPlot(fna.B, reduction = "umap", split.by = "day")
+#b2 <- DimPlot(fna.B, reduction = "umap", group.by = "seurat_clusters")
+#b1 + b2
+
+# Turner definitions
+gcb.markers <- c("BCL6", "RGS13", "MEF2B", "STMN1", "ELL3", "SERPINA9")
+
+
+# DefaultAssay(fna.B) <- "RNA"
+# b3 <- DotPlot(fna.B, features = c( "TCL1A", "IL4R", "CCR7", "IGHM", "IGHD",
+#                                    gcb.markers,
+#                                      "XBP1", "IRF4", "SEC11C", "FKBP11", "JCHAIN", "PRDM1",
+#                                    "TNFRSF13B", "CD24", "CD27", "TBX21", "FCRL5", "ITGAX", "NKG7", "ZEB2", "CR2")) + ggpubr::rotate_x_text()
+
+# Based on the dotplot above, we can annotate cell types:
+fna.B <- RenameIdents(object = fna.B,'0' = 'mem resting', '1' = 'naive', '2' = 'activated', '3' = 'germinal centre', '4' = 'plasma cell')
+
+# Make a new factor, where the levels include the number of cells and %.
+Idents(fna.B) <- factor(paste0(
+  levels(Idents(fna.B))," [",
+  signif(summary(Idents(fna.B)) * 100/length(Idents(fna.B)),digits = 3), "%]")[ as.numeric(Idents(fna.B))])
+
+
+fna.umap <- DimPlot(fna.B, reduction = "umap",cols = "Dark2")
+fna.umap <- fna.umap + theme_pubr(legend = "bottom") +
+  labs(colour = paste0("Cell assignment\n[% of B cells]")) +
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  theme(aspect.ratio = 1, legend.direction = "vertical",
+        axis.ticks = element_blank(), axis.text = element_blank())
+#fna.umap
+
+
+```
+
+```{r tracking_GC_clones}
+
+load(file = "../Turner_dataset_reanalysis/R_results_objects/Track_clonotype_alluvial_plot.RData")
+
+p4 <- p3 + theme_pubr(legend = "none") + 
+  scale_x_discrete(labels = 
+                     c("d0 A", "d0 B",
+                       "d5 A", "d5 B",
+                       "d12 A", "d12 B", "d12 C",
+                       "d28 A", "d28 B",
+                       "d60 A", "d60 B",
+                       "d12", "d28", "d60",
+                       "d12", "d28", "d60")) + 
+  scale_y_continuous(labels = scales::label_percent()) +
+  ggtitle(label = "") + 
+  xlab("day replicate") + 
+  rotate_x_text() +
+  ylab("% of B cells\nsharing BCRs with d12 GC B") +
+  geom_rect(aes(xmin=.5, xmax=11.5, ymin=-Inf, ymax=Inf), fill = "grey90", alpha=0.5, stat="identity") +
+  geom_rect(aes(xmin=14.5, xmax=17.5, ymin=-Inf, ymax=Inf), fill = "grey90", alpha=0.5, stat="identity")
+
+# Need to move the order of the layers around,
+# so the geom_rects are lower layers, 
+# and the bars anre plotted on top.
+p5 <- p4
+p4$layers[[1]] <- p5$layers[[3]]
+p4$layers[[2]] <- p5$layers[[4]]
+p4$layers[[3]] <- p5$layers[[1]]
+p4$layers[[4]] <- p5$layers[[2]]
+
+# Add some annotations
+p4 <- p4 + annotate(geom= "text", x = 2, y = 0.03, label = "FNA", size = 4)
+p4 <- p4 + annotate(geom= "text", x = 13, y = 0.03, label = "PBMC", size = 4)
+p4 <- p4 + annotate(geom= "text", x = 16, y = 0.03, label = "IgD-\nenriched\nPBMC", size = 4, lineheight = 1)
+#p4 
+
+rm(p3, p5)
+```
+
+```{r PBMC_B_UMAP_and_GC_progeny, warning=FALSE, message=FALSE, results='hide'}
+load("../Turner_dataset_reanalysis/R_results_objects/barcodes_for_IgD_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+
+load("../Turner_dataset_reanalysis/seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated_just_B_cells.RData")
+
+DefaultAssay(pbmc.B) <- "integrated" # set explicitly, so we re-cluster on integrated anchors.
+
+# Run the standard workflow for visualization and clustering
+pbmc.B <- ScaleData(pbmc.B, verbose = FALSE)
+pbmc.B <- RunPCA(pbmc.B, npcs = 20, verbose = FALSE)
+
+pbmc.B <- FindNeighbors(pbmc.B, dims = 1:20)
+pbmc.B <- FindClusters(pbmc.B, resolution = 0.05) # Turner used 0.2, for this integration approach 0.05 gives biologically relevant clusters.
+
+pbmc.B <- RunUMAP(pbmc.B, reduction = "pca", dims = 1:20)
+
+# Re-factor the 'day' so its in numerical order:
+pbmc.B$day <- factor(pbmc.B$day, levels = c("d0", "d5", "d12", "d28", "d60"))
+
+# Make a new factor, where the levels include the number of cells @ each day.
+pbmc.B$day_label <- factor(paste0(
+  levels(pbmc.B$day),"\n", summary(pbmc.B$day), " cells")[ as.numeric(pbmc.B$day) ])
+
+# fix the order:
+pbmc.B$day_label <- factor(pbmc.B$day_label, levels = 
+                             levels(pbmc.B$day_label)[
+  order(as.numeric(
+    gsub(levels(pbmc.B$day_label), pattern = "d|\n.*$", replacement = "")))
+  ])
+
+######
+# Make a list of barcodes:
+## Some of these rows have >1 barcode associated with it, where BCRs are identical between GEMs.
+barcodes.d28 <- unlist(strsplit(filt.IgD.d28$Barcode, ";"))
+
+barcodes.d28 <- paste0(barcodes.d28, "_4") # the d28 sample barcodes are appended with '_4' By Seurat on import.
+
+# summary(barcodes.d28 %in% rownames(pbmc.integrated@meta.data)) # 38 cells are found; 1 cell is not (this cell presumably fails the QC at the start)
+summary(barcodes.d28 %in% rownames(pbmc.B@meta.data)) # 38 cells are found, AND are B cells; 1 cell is not (this cell presumably fails the QC at the start)
+
+# Make a factor in the metadata of the Seurat object.
+pbmc.B$GC_related_BCR <- factor("N", levels = c("GC derived BCR", "N"))
+
+#pbmc.B$GC_related_BCR[rownames(pbmc.B@meta.data) %in% barcodes.d60] <- "Y"
+pbmc.B$GC_related_BCR[rownames(pbmc.B@meta.data) %in% barcodes.d28] <- "GC derived BCR"
+
+#DimPlot(pbmc.B, reduction = "umap")
+
+pbmc.B.labelled <- RenameIdents(pbmc.B,
+                                '0' = 'resting<br>mem', '1' = '*FCRL5*+<br>B mem', '2' = 'naive', '3' = 'plasma<br>cell')
+
+PBMC.B.umap <- DimPlot(pbmc.B.labelled, reduction = "umap", cols = "Set1")
+PBMC.B.umap <- PBMC.B.umap + theme_pubr(legend = "bottom") +
+  labs(colour = paste0("Cell assignment")) +
+  xlab("UMAP 1") + ylab("UMAP 2") + 
+  # set axis bounds, so the same can be set for the GC-daughters UMAP:
+  ylim(-10, 10) + xlim(-5, 12) + 
+  theme(aspect.ratio = 1, legend.direction = "vertical", 
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        legend.text = ggtext::element_markdown())
+
+PBMC.B.umap.GC <- DimPlot(pbmc.B.labelled[, pbmc.B.labelled$GC_related_BCR == "GC derived BCR"],
+                          reduction = "umap", cols = "Set1")
+PBMC.B.umap.GC <-  PBMC.B.umap.GC + theme_pubr(legend = "right") +
+  labs(colour = paste0("Cell assignment")) +
+  xlab("UMAP 1") + ylab("UMAP 2") +
+    # set axis bounds, so the same can be set for the GC-daughters UMAP:
+  ylim(-10, 10) + xlim(-5, 12) + 
+  theme(aspect.ratio = 1, legend.direction = "vertical", 
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        legend.text = ggtext::element_markdown())
+
+wanted <- c("MARCKS", "CPNE5", "COCH", 
+  "PLPP5","YBX3", "TCL1A",
+  "ENC1", "ZBTB32", "ITGAX",
+  "FCRL5", "CD86", 
+  "TBX21","BCL6","PRDM1","PAX5",
+  "XRCC6","AICDA",
+  "CCR7", "SELL", "CXCR4",
+  "CXCR3", "TNFRSF13B",
+  "FCER2", "CD27", "CD24")
+
+DefaultAssay(pbmc.B.labelled) <- "RNA"
+# Normalize RNA data for visualization purposes
+pbmc.B.labelled <- NormalizeData(pbmc.B.labelled, verbose = FALSE)
+
+
+
+dots <- DotPlot(pbmc.B.labelled,
+        features = wanted,
+        scale.by = "size",
+        dot.scale = 5,
+        cols = c("lightgrey", "darkblue")) + rotate_x_text() +
+  theme(axis.text.x = element_text(face = "italic"),
+        axis.text.y = ggtext::element_markdown())
+
+celltypes <- table(Idents(pbmc.B.labelled), pbmc.B.labelled$GC_related_BCR)
+
+celltypes <- as.data.frame(cbind("cell" = rownames(celltypes),
+                    "count" = celltypes[,1]))
+
+celltypes$count <- as.numeric(as.character(celltypes$count))
+celltypes$pct <- (celltypes$count / sum(celltypes$count)) * 100
+
+celltypes <- celltypes[,colnames(celltypes) != c("count")]
+
+#reshape2::melt(celltypes)
+
+GCoutput <- ggbarplot(data = reshape2::melt(celltypes), y = "value",x = "cell",
+          ylab = "\n% GC derived B cells", 
+          xlab = "Cellular phenotype in the circulation @ d28",
+          fill = RColorBrewer::brewer.pal(4,"Set1")) + theme_pubr() +
+  theme(axis.text.x = ggtext::element_markdown())
+
+
+```
+
+```{r multi_panel_figure}
+
+cowplot::plot_grid(
+  cowplot::plot_grid(
+    fna.umap,
+    p4,
+    PBMC.B.umap,
+    dots +
+      theme_pubr(legend = "right") +
+      xlab("Gene") + ylab("\nCirculating IgD- B cell\nclusters") + 
+      rotate_x_text(face = "italic") + 
+      theme(legend.key.width = unit(12,"points"),
+            legend.key.height = unit(12,"points"),
+            legend.margin = margin(0,0,0,0, 'lines'),
+            legend.justification = "bottom",
+            axis.text.y = ggtext::element_markdown()) + 
+      guides(size = guide_legend(title = "% of cells\nexpressing"),
+             colour = guide_colorbar(title = "Scaled\nexpression", 
+                                     direction = "horizontal",
+                                     title.position = "top",
+                                     label.theme = element_text(angle = 90, vjust = 0.5))),
+    
+    rel_widths = c(1,3),
+    ncol = 2,
+    labels = LETTERS[1:4]),
+  
+  cowplot::plot_grid(PBMC.B.umap.GC, GCoutput, labels = c("E", "F", ""), ncol = 2),
+  
+  ncol = 1,
+  rel_heights = c(3,1))
+
+```
+
+\newpage
+
+__Figure 5 - Germinal center emigrant memory B cells are FCRL5^+^__
+
+(A) UMAP of B cells (n=`r length(Idents(fna.B))` cells) from fine needle aspirates (FNAs) of draining axillary lymph nodes from a single healthy volunteer on days 0, 5, 12, 28 and 60 after quadrivalent influenza vaccine (QIV), as reported by Turner _et al._.
+(B) The B cell receptors detected in germinal center (GC) B cells on day 12 after QIV immunization are shared with earlier LN B cells, and are detectable in peripheral blood mononuclear cells (PBMC) that have been enriched for B cell memory (IgD-) at days 28 and 60 post-vaccine. Sharing of a B cell receptor (BCR) requires: i. identical IGHV and IGHJ usage ii. identical heavy chain CDR3 length iii. identical IGLV and IGLJ usage and iv. identical light chain CDR3 length.
+(C) UMAP of circulating B cells (n=`r length(Idents(pbmc.B))` cells) from IgD- enriched PBMCs at days 0, 5, 12, 28 and 60 after QIV. Clusters identified by Louvain clustering, and annotated based on (D).
+(D) Dotplot showing the expression of key genes, defined from the HA-specific B cell sequencing (Figure 2B),  used to annotate the clusters identified in (C).
+(E) UMAP of circulating QIV-specific B cells from IgD- enriched PBMCs at day 28 which share a germinal center BCR, n=`r ncol(pbmc.B.labelled[,pbmc.B.labelled$GC_related_BCR == "GC derived BCR"])` cells.
+(F) The percentage of QIV-specific B cells, present in the circulation at day 28, as in (E) is shown for each B cell cluster.
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

@@ -1,0 +1,340 @@
+---
+title: ""
+author: ""
+date: ""
+output: 
+  pdf_document: 
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+```{r packages}
+
+## This requires a working GCC compiler
+## For the Babraham cluster, running RStudio via Jupyterhub, the Rstudio console path does not include a GCC compiler.
+## Running the line below, via an R session in terminal (of Rstudio) does work.
+
+# devtools::install_github("immunomind/immunarch", ref="dev")
+
+
+library(immunarch)
+
+```
+
+```{r import_VDJs}
+
+###
+# This will need adjusting to your system in two ways:
+## 1. Each 'filtered_contig_annotation.csv' needs to be named uniquely.
+## I pre-pended the SRRxxx number.
+## (eg. mv filtered_cont SRRxxx_filtered_cont)
+## actual code not included
+##
+## 2. the file path to this directory of directories containing 'filtered_contig_anntations.csv' likely to be different.
+##
+####
+# Immunarch have an alternative import strategy with a metadata file.
+# That may be a faster return if re-implementing.
+###
+
+# Need to identify the output from cellranger vdj count
+file_path <- list.files(path = "cellranger/",
+                         pattern = "filtered_contig_annotations.csv",
+                         recursive = T, full.names = T, all.files = T)
+
+file_path <- file_path [ grepl(file_path, pattern = "outs")]
+
+
+# Load in the data:
+igdata <- repLoad(file_path, .mode = "paired")
+
+```
+
+```{r}
+# Very low level filtering check:
+# these all look to be coding and inframe, as these columns are identical:
+cbind(lapply(coding(igdata$data), nrow), lapply(igdata$data, nrow))
+cbind(lapply(inframes(igdata$data), nrow), lapply(igdata$data, nrow))
+
+
+```
+
+```{r}
+# labels:
+## Maybe an immunarch metadata file would be more elegant.
+
+labels <- data.frame(cbind(
+  "SRR" = gsub(basename(file_path), pattern = ".csv", replacement =""),
+  "day" = c("d60", "d60",
+            "d28", "d28",
+            "d12", "d12", "d12",
+            "d5", "d5",
+            "d0", "d0",
+            "d60",
+            "d28",
+            "d12",
+            "d5",
+            "d0",
+            "d60",
+            "d28",
+            "d12",
+            "d5",
+            "d0"),
+  "source" = c(rep("FNA",11), rep("PBMC_enriched_IgD_neg", 5), rep("PBMC", 5))
+  
+)
+  
+)
+
+labels$short_name <- paste(labels$source, labels$day, sep = "_")
+
+labels$short_name <- paste0(labels$short_name,
+                            ifelse(duplicated(labels$short_name), "_2", "_1"))
+
+labels$short_name[duplicated(labels$short_name)] <- gsub(labels$short_name[duplicated(labels$short_name)], pattern = "_2", replacement = "_3")
+
+
+
+## Apply the names
+all(names(igdata$data) == labels$SRR) # idiot check to see they are identical first.
+
+names(igdata$data) <- labels$short_name
+
+##
+# It is handy to build a vector to sort the SRRs by too.
+labels$day <- factor(labels$day, levels = c("d0", "d5", "d12", "d28", "d60")) # on factorising, R puts d5 as the final level. This re-factorises with levels that are meaningful.
+
+time_source_order <- order(labels$source, labels$day)
+
+cbind(time_source_order)
+
+omit_these <- which (labels$short_name %in% c("PBMC_d0_1", "PBMC_d5_1", "PBMC_enriched_IgD_neg_d0_1",
+                                  "PBMC_enriched_IgD_neg_d5_1"))
+
+
+time_source_order_no_PBMCd0or5 <- time_source_order[ ! time_source_order %in% omit_these ]
+time_source_order_no_PBMCd0or5
+
+```
+
+
+```{r}
+# First need to select JUST GC B cells.
+
+load("seurat_objects/1_FNA_GC_B_d12_barcodes.RData")
+
+
+# The 3 day 12 FNA samples are:
+## SRR111 *
+## 26, 27, 28
+## Or just the newly added label.
+
+GCigdata <- lapply(igdata$data[ which(grepl(names(igdata$data), pattern = "FNA_d12"))], function(x) {
+  y <- select_barcodes(x, gsub(GCbarcodes, pattern = "_.*", replacement = ""))
+  return(y)
+})
+
+
+# day 12:
+### Need to split this for IGH and light chains
+target <- GCigdata[[ which(grepl(names(GCigdata), pattern = "FNA_d12_1")) ]] %>%
+  # select cells with sequences for BOTH a heavy and light chain
+  filter(grepl(chain, pattern = ";")) %>%
+  # remove any cells with > 2 light chains
+  # these are very rare, and programmatically more complicated to track clonotypes.
+  # (which light chain would you use? would you track both?)
+  # there isn't necessarily anything inaccurate about their reported sequences
+  filter(nchar(as.character(chain)) == 7) %>%
+ # heavy chains
+  mutate("IGH.V.name" = gsub(.$V.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.D.name" = gsub(.$D.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.J.name" = gsub(.$J.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.aa" = gsub(.$CDR3.aa, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.length" = as.character(nchar(IGH.CDR3.aa))) %>%
+  # Light chains
+  mutate("IGL.V.name" = gsub(.$V.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.J.name" = gsub(.$J.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.aa" = gsub(.$CDR3.aa, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.length" = as.character(nchar(IGL.CDR3.aa))) %>%
+  
+  select(chain, IGH.V.name, IGH.J.name, IGH.CDR3.aa, IGH.CDR3.length, IGL.V.name, IGL.J.name, IGL.CDR3.aa, IGL.CDR3.length)
+
+target2 <- GCigdata[[which(grepl(names(GCigdata), pattern = "FNA_d12_2")) ]] %>%
+  # select cells with sequences for BOTH a heavy and light chain
+  filter(grepl(chain, pattern = ";")) %>%
+  # remove any cells with > 2 light chains
+  # these are very rare, and programmatically more complicated to track clonotypes.
+  # (which light chain would you use? would you track both?)
+  # there isn't necessarily anything inaccurate about their reported sequences
+  filter(nchar(as.character(chain)) == 7) %>%
+ # heavy chains
+  mutate("IGH.V.name" = gsub(.$V.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.D.name" = gsub(.$D.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.J.name" = gsub(.$J.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.aa" = gsub(.$CDR3.aa, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.length" = as.character(nchar(IGH.CDR3.aa))) %>%
+  # Light chains
+  mutate("IGL.V.name" = gsub(.$V.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.J.name" = gsub(.$J.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.aa" = gsub(.$CDR3.aa, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.length" = as.character(nchar(IGL.CDR3.aa))) %>%
+  
+  select(chain, IGH.V.name, IGH.J.name, IGH.CDR3.aa, IGH.CDR3.length, IGL.V.name, IGL.J.name, IGL.CDR3.aa, IGL.CDR3.length)
+
+target3 <- GCigdata[[which(grepl(names(GCigdata), pattern = "FNA_d12_3")) ]] %>%
+  # select cells with sequences for BOTH a heavy and light chain
+  filter(grepl(chain, pattern = ";")) %>%
+  # remove any cells with > 2 light chains
+  # these are very rare, and programmatically more complicated to track clonotypes.
+  # (which light chain would you use? would you track both?)
+  # there isn't necessarily anything inaccurate about their reported sequences
+  filter(nchar(as.character(chain)) == 7) %>%
+ # heavy chains
+  mutate("IGH.V.name" = gsub(.$V.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.D.name" = gsub(.$D.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.J.name" = gsub(.$J.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.aa" = gsub(.$CDR3.aa, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.length" = as.character(nchar(IGH.CDR3.aa))) %>%
+  # Light chains
+  mutate("IGL.V.name" = gsub(.$V.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.J.name" = gsub(.$J.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.aa" = gsub(.$CDR3.aa, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.length" = as.character(nchar(IGL.CDR3.aa))) %>%
+  
+  select(chain, IGH.V.name, IGH.J.name, IGH.CDR3.aa, IGH.CDR3.length, IGL.V.name, IGL.J.name, IGL.CDR3.aa, IGL.CDR3.length)
+
+
+targets <- rbind(target, target2, target3)
+
+targets <- targets[, ! ( colnames(targets) %in%  c("IGH.CDR3.aa", "IGL.CDR3.aa") ) ] # drop aa for pairings.
+
+# Add CDR3 length etc to igdata:
+z <- lapply(igdata$data, function(x) {
+  y <- x %>% # select cells with sequences for BOTH a heavy and light chain
+  filter(grepl(chain, pattern = ";")) %>%
+  # remove any cells with > 2 light chains
+  # these are very rare, and programmatically more complicated to track clonotypes.
+  # (which light chain would you use? would you track both?)
+  # there isn't necessarily anything inaccurate about their reported sequences
+  filter(nchar(as.character(chain)) == 7) %>%
+ # heavy chains
+  mutate("IGH.V.name" = gsub(.$V.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.J.name" = gsub(.$J.name, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.aa" = gsub(.$CDR3.aa, pattern = ";.*", replacement = "")) %>%
+  mutate("IGH.CDR3.length" = as.character(nchar(IGH.CDR3.aa))) %>%
+  # Light chains
+  mutate("IGL.V.name" = gsub(.$V.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.J.name" = gsub(.$J.name, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.aa" = gsub(.$CDR3.aa, pattern = ".*;", replacement = "")) %>%
+  mutate("IGL.CDR3.length" = as.character(nchar(IGL.CDR3.aa)))
+  return(y)})
+  
+zz <- z[time_source_order_no_PBMCd0or5]
+p3 <- trackClonotypes(zz, targets) %>% vis()
+p3 + theme(legend.position = "none") + 
+  ggtitle(label = "Tracking GC B cells from FNA day 12 samples") + 
+  xlab("") + 
+  ylab("Proportion of BCRs\n(GC and non-GC)")
+
+#p3$data
+
+#igdata$data$SRR11233635_filtered_contig_annotations$CDR3.aa %in% targets$CDR3.aa
+
+save(p3, file = "R_results_objects/Track_clonotype_alluvial_plot.RData")
+
+```
+
+```{r}
+
+
+## Find the shared clonotypes:
+tracked <- trackClonotypes(zz, targets)
+
+# 'tracked' is a data.frame (really a sub-class 'immunr_dynamics'). 
+# It contains the keys (V/J/CDR3 length etc) on which a match was selected, and the relevant proportions in each fastq.
+
+# Get down to pairs with one of the FNA day 12 GC B cells.
+## The 'targets' object above is already subseted on just the GC B cells within these fastq files.
+filt.tracked <- tracked[tracked$FNA_d12_1 > 0 | 
+                          tracked$FNA_d12_2 > 0 |
+                          tracked$FNA_d12_3 > 0 , ]
+
+# SRR* 35 is the IgD enriched PBMC day 28 sample.
+filt.tracked.to.IgD.d28 <- filt.tracked[filt.tracked$PBMC_enriched_IgD_neg_d28_1 > 0, ]
+
+
+# Remake a 'key' column to do the match with:
+filt.tracked.to.IgD.d28$key <- paste(filt.tracked.to.IgD.d28$IGH.V.name, filt.tracked.to.IgD.d28$IGH.J.name, filt.tracked.to.IgD.d28$IGH.CDR3.length, filt.tracked.to.IgD.d28$IGL.V.name, filt.tracked.to.IgD.d28$IGL.J.name,  filt.tracked.to.IgD.d28$IGL.CDR3.length)
+
+# Within the igdata set the barcodes are retained.
+# We need to create the 'key' to match.
+IgD.d28 <- z$PBMC_enriched_IgD_neg_d28_1 %>%
+  mutate("key" = paste(IGH.V.name, IGH.J.name, IGH.CDR3.length,
+                       IGL.V.name, IGL.J.name, IGL.CDR3.length ))
+
+filt.IgD.d28 <- IgD.d28 %>%
+  filter(IgD.d28$key %in% filt.tracked.to.IgD.d28$key)
+
+
+
+dim(filt.tracked.to.IgD.d28)
+dim(filt.IgD.d28)
+
+## Therefore, there are 24 clonotypes (defined as identity: IGHV, IGHJ, CDR 3 length AND IGLV, IGLJ and CDR 3 length), shared between GC B cells and IgD enriched PBMC at day 28.
+## These clones are supported by 39 clones in the IgD-PBMC enriched sample (36 rows, +1, + 2 - explained in next two lines)
+## There is one clone where 2 cells are identical at aa sequence for both CDR3s, so are collapsed to a single row.
+## There is one clone where 3 cells are identical at aa sequence for both CDR3s, so are collapsed to a single row.
+
+#save(filt.IgD.d28, file = "barcodes_for_IgD_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+
+
+## Repeat for day 60:
+# SRR* 35 is the IgD enriched PBMC day 28 sample.
+filt.tracked.to.IgD.d60 <- filt.tracked[filt.tracked$PBMC_enriched_IgD_neg_d60_1 > 0, ]
+
+
+# Remake a 'key' column to do the match with:
+filt.tracked.to.IgD.d60$key <- paste(filt.tracked.to.IgD.d60$IGH.V.name, filt.tracked.to.IgD.d60$IGH.J.name, filt.tracked.to.IgD.d60$IGH.CDR3.length, filt.tracked.to.IgD.d60$IGL.V.name, filt.tracked.to.IgD.d60$IGL.J.name,  filt.tracked.to.IgD.d60$IGL.CDR3.length)
+
+# Within the igdata set the barcodes are retained.
+# We need to create the 'key' to match.
+IgD.d60 <- z$PBMC_enriched_IgD_neg_d60_1 %>%
+  mutate("key" = paste(IGH.V.name, IGH.J.name, IGH.CDR3.length,
+                       IGL.V.name, IGL.J.name, IGL.CDR3.length ))
+
+filt.IgD.d60 <- IgD.d60 %>%
+  filter(IgD.d60$key %in% filt.tracked.to.IgD.d60$key)
+
+
+
+dim(filt.tracked.to.IgD.d60)
+dim(filt.IgD.d60)
+
+
+
+save(filt.IgD.d28, file = "R_results_objects/barcodes_for_IgD_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+
+
+save(filt.IgD.d60, file = "R_results_objects/barcodes_for_IgD_d60_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+
+```
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

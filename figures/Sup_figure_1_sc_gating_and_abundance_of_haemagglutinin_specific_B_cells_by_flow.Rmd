@@ -1,0 +1,168 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9, tidy.opts=list(width.cutoff=60))
+```
+
+```{r data_load}
+
+
+
+library(tidyverse)
+library(ggpubr) # for themes for plots.
+
+
+load(file = "../cohort_2016_17/Concatenated_index_master_fcs_gated_in_FlowJo_2_table_output.RData")
+
+merged.data <- as_tibble(merged.data)
+
+```
+
+```{r first_panel_is_flow_gating}
+
+# See flowsinglecell repository for details.
+## flowWorkspace used to parse a flowjo .wsp, with gated files.
+## ggcyto used to plot, with the gpubr::theme_pubr() super-imposed.
+## arranged as a single row of plots and the title section removed.
+
+load(file = "../cohort_2016_17/Example_of_sc_sort_gating_from_665X_d42.RData")
+
+
+
+
+```
+
+```{r plots, fig.height=9}
+##
+# Plots
+# The plots need some adjustments to labels etc.
+# These are done in the figure.Rmd in B_flu_scRNAseq repository.
+###
+## choose a y
+## (then the next few lines do not need adjusting)
+merged.data$y1 <- merged.data$`Lymphocytes/Single Cells/Single Cells/DUMP-/CD19+SA-/hA_APC+hA_PE+ | Freq. of Parent (%)`
+
+y1 <- "y1"
+ylab1 <- "\nHA+ B cells \n[% of live B cells]"
+
+y <- "num_HA_B_cells_per_10e6_PBMC"
+ylab <- "<br>number of HA B cells per 10<sup>7</sup> PBMC"
+##
+
+# Reshape for a paired plot
+data.for.ggpaired <- reshape2::dcast(
+  merged.data, PID+age ~ day, value.var = y)
+
+data.for.ggpaired1 <- reshape2::dcast(
+  merged.data, PID+age ~ day, value.var = y1)
+
+
+cowplot::plot_grid(
+
+  
+  cowplot::plot_grid(p2, labels = "A"),
+  
+  cowplot::plot_grid(
+  # HA positive B cells [% of B cells] days 0 vs 42
+  # Facet by day, to compare the day 42 %s - no difference.
+  
+  ggstripchart(merged.data, x = "age", 
+               y = y1,
+               facet.by = "day",
+               ylab = ylab1) +
+    geom_boxplot(outlier.shape = NA, fill = NA) + 
+    stat_compare_means(method = "wilcox",
+                       label.y = 0.35,
+                       paired = FALSE,
+                       comparisons = list(c(1,2))) +
+    rotate_x_text() + 
+    theme(strip.background = element_rect(fill = NA)),
+  
+  ### ROW 2
+  
+  ggpaired(data.for.ggpaired, cond1 = "d0", cond2 = "d42", facet.by = "age",
+         ylab = ylab, line.color = "grey",
+         xlab = "day") +
+  stat_compare_means(method = "wilcox",
+                     label.y = 3000,
+                     paired = TRUE,
+                     comparisons = list(c(1,2))) +
+    theme(strip.background = element_rect(fill = NA),
+          axis.title.y = ggtext::element_markdown()),
+
+
+
+
+
+ggstripchart(merged.data, x = "age", 
+          y = y,
+          facet.by = "day",
+          ylab = ylab) +
+  geom_boxplot(outlier.shape = NA, fill = NA) + 
+  stat_compare_means(method = "wilcox",
+                     label.y = 3000,
+                     paired = FALSE,
+                     comparisons = list(c(1,2))) +
+  rotate_x_text() +
+  theme(strip.background = element_rect(fill = NA),
+          axis.title.y = ggtext::element_markdown()),
+
+
+
+ncol = 3, labels = LETTERS[2:4]),
+
+ncol = 1, rel_heights = c(5,4))
+
+###
+# Fold expansion
+data.for.ggpaired$expansion <- data.for.ggpaired$d42/data.for.ggpaired$d0
+
+# data.for.ggpaired %>%
+#   group_by(age) %>%
+#   dplyr::summarise(median = median(expansion))
+
+###
+# Useful to calculate the median cell counts for figure legends:
+tab <- merged.data %>% 
+  group_by(day, age) %>%
+  summarise(m = round(median(num_HA_B_cells_per_10e6_PBMC)))  
+
+```
+
+
+\newpage
+__Supplementary figure 1: Single cell sorting strategy for haemagglutinin specific B cells and abundance of haemagglutinin specific B cells__
+
+(A) Example flow sorting gating strategy on B cells. B cells were negatively separated from PBMC using magnetic sorting prior to flow sorting.
+(B) The proportion of haemagglutinin binding B cells (as % of live B cells), is not significantly different between age groups either before, or 6 weeks after TIV immunization.
+(C-D) The number of haemagglutinin binding B cells per 10^7^ PBMC analysed by age and days post vaccination.
+(D) The number of haemagglutinin binding B cells is higher in 22-36 year olds at day 42. The number of haemagglutinin binding B cells was calculated as in (C).
+In (B) and (D), the _P_ values shown are from an unpaired two-tailed Mann-Whitney test. In (C), samples from the same individual are indicated with a grey line. The _P_ values shown are from a paired two-tailed Mann-Whitney test.
+
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

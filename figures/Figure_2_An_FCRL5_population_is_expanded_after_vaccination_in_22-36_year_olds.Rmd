@@ -1,0 +1,546 @@
+---
+title: ''
+author: ''
+date: ''
+output:
+  pdf_document: default
+header-includes:
+    - \pagenumbering{gobble}
+editor_options:
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 8, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r load_data}
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(MultiAssayExperiment)
+
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+load(file = "../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+
+library(ggpubr) # for themes for plots.
+
+```
+
+```{r marker_genes_for_clusters}
+
+# Adjust parameters here:
+lfc <- 2
+pval.type <- "any" # 'any' means return highly ranked genes that are DE between group X and ANY OTHER group(s).
+fdr <- 0.01
+# Do not adjust below here.
+
+markers.up <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type,
+  direction = "up",
+  lfc=lfc, test.type ="t" )
+
+markers.down <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type,
+  direction = "down",
+  lfc=lfc, test.type ="t" )
+
+markers <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type, lfc=lfc, test.type ="t" )
+
+library(org.Hs.eg.db)
+# Map each list of markers to gene symbol:
+markers.up <- lapply(markers.up, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+markers.down <- lapply(markers.down, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+markers <- lapply(markers, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+
+# Write out the significant genes (note lfc set at start of this chunk)
+markers.up <- lapply(markers.up, function(x) {
+     (x[x$FDR<fdr,])
+ })
+markers.down <- lapply(markers.down, function(x) {
+     (x[x$FDR<fdr,])
+ })
+markers <- lapply(markers, function(x) {
+     (x[x$FDR<fdr,])
+ })
+
+# number of marker genes for each cluster:
+number.of.genes.up <- as.data.frame(matrix(lapply(markers.up, nrow), byrow = T))
+number.of.genes.down <- as.data.frame(matrix(lapply(markers.down, nrow), byrow = T))
+number.of.genes <- as.data.frame(matrix(lapply(markers, nrow), byrow = T))
+
+colnames(number.of.genes.up) <- "number"
+number.of.genes.up$number <- as.numeric(number.of.genes.up$number)
+number.of.genes.up$cluster <- factor(c(1:length(markers)))
+colnames(number.of.genes.down) <- "number"
+number.of.genes.down$number <- as.numeric(number.of.genes.down$number)
+number.of.genes.down$cluster <- factor(c(1:length(markers)))
+colnames(number.of.genes) <- "number"
+number.of.genes$number <- as.numeric(number.of.genes$number)
+number.of.genes$cluster <- factor(c(1:length(markers)))
+
+```
+
+```{r, results="hide" }
+#Select the top 15 for each cluster
+#(object is called 'top10' but the selection is top 15, with ties allowed.)
+## Note that ties are allowed, so nrow > 15.
+top10 <- lapply(markers, function(x) {
+  z <- x[x$Top <= 15, ]
+  return(z)})
+
+names(top10) <- paste0("top10feats.", names(top10))
+
+list2env(top10 ,.GlobalEnv)
+
+top10feats <- c(top10feats.1[,"symbol"],
+                top10feats.2[,"symbol"],
+                top10feats.3[,"symbol"],
+                top10feats.4[,"symbol"])
+
+top10feats <- top10feats[!duplicated(top10feats)] # remove duplicates.
+top10feats <- top10feats[!isNA(top10feats)] # remova anything that doesn't map to gene symbol.
+
+# Italics
+# After https://www.biostars.org/p/400381/
+# Hat tip to Kevin Blighe for this quick solution
+# (I previously rummaged in the gtable to change the gpar).
+
+newnames <- lapply(
+  (top10feats),
+  function(x) bquote(italic(.(x))))
+
+
+
+HM <- plotHeatmap(sce, features=names(top10feats), order_columns_by="clusters",
+    colour_columns_by=c("clusters"),
+    labels_row = as.expression(newnames),
+    color = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name ="PRGn")))(100),
+    center=TRUE, symmetric=TRUE, zlim=c(-4, 4),
+    silent = T, annotation_legend = F, fontsize = 8)
+
+## To add a label to the colour bar.
+# Hat tip 
+# https://stackoverflow.com/questions/36852101/r-legend-title-or-units-when-using-pheatmap
+
+library(gtable)
+library(grid)
+# NB - if you change annotation_cols / row etc [[6]] would change [[n]]
+legend.grob <- HM$gtable$grobs[[6]] 
+
+#Move legend down a small amount for room for title
+#Shift both down by 1 inch
+legend.grob$children[[1]]$y <- legend.grob$children[[1]]$y - unit(0.2,"npc") 
+legend.grob$children[[2]]$y <- legend.grob$children[[2]]$y - unit(0.2,"npc") 
+legend.grob$children[[1]]$x <- legend.grob$children[[1]]$x - unit(0.1,"npc") 
+legend.grob$children[[2]]$x <- legend.grob$children[[2]]$x - unit(0.1,"npc")
+
+#New legend label grob
+leg_label <- textGrob("Expression",x=0,y=0.81,hjust=0.5,vjust=0,gp=gpar(fontsize=8,fontface="bold"))
+
+#Add label to legend grob
+legend.grob2 <- addGrob(legend.grob,leg_label)
+
+HM$gtable$grobs[[6]] <- legend.grob2
+
+```
+
+```{r}
+# Differential abundance analysis.
+# DA performed in '5_DA_analysis.Rmd', using edgeR.
+# Results plotted here.
+
+load("../cohort_2016_17/data/DA_analysis_results.RData")
+
+#
+library(edgeR)
+
+DA <- rbind(
+  as.data.frame(topTags(res)) %>%
+    mutate(clusters = rownames(.)) %>%
+    mutate(group = 
+             factor("all", levels = 
+                      c("all", paste0(levels(ALFNA16$Age.Group), " yo")))),
+  as.data.frame(topTags(res.O)) %>%
+    mutate(clusters = rownames(.)) %>%
+    mutate(group = 
+             factor(paste0(levels(ALFNA16$Age.Group)[2], " yo"),
+                    levels = 
+                      c("all",paste0(levels(ALFNA16$Age.Group), " yo")))),
+  as.data.frame(topTags(res.Y)) %>%
+    mutate(clusters = rownames(.)) %>%
+    mutate(group = 
+             factor(paste0(levels(ALFNA16$Age.Group)[1], " yo"),
+                    levels = c("all", paste0(levels(ALFNA16$Age.Group), " yo")))))
+
+
+DA$neglog10FDR <- -log10(DA$FDR)
+
+
+
+# Re-shape the abundance table to a long format dataframe.
+
+abundance.long.format <- reshape2::melt(abundances)
+colnames(abundance.long.format) <- c("clusters", "id", "count")
+abundance.long.format <- abundance.long.format %>%
+  mutate(age = 
+           factor(paste0(
+             ifelse(grepl(.$id, pattern = "old"),
+                         levels(ALFNA16$Age.Group)[2],
+                         levels(ALFNA16$Age.Group)[1]),
+             " yo")
+         )) %>%
+  mutate(day = 
+           factor(ifelse(grepl(.$id, pattern = "d0"), "d0", "d42"))) %>%
+  mutate(clusters = factor(clusters))
+
+# Re-shape for a paired plot, where there is count_d0 and a count_d42.
+abundance.data.for.ggpaired <- abundance.long.format %>% 
+           mutate(id = as.character(id)) %>%
+           mutate(PID = substr(id, nchar(id)-3, nchar(id))) %>%
+           .[order(.$clusters, .$PID),]
+
+abundance.data.for.ggpaired <- reshape2::dcast(
+  abundance.data.for.ggpaired, PID+age+clusters ~ day, value.var = "count")
+abundance.data.for.ggpaired$d0[is.na(abundance.data.for.ggpaired$d0)] <- 0 # set NA to zero.
+abundance.data.for.ggpaired$d42[is.na(abundance.data.for.ggpaired$d42)] <- 0 # set NA to zero.
+
+abundance.data.for.ggpaired %<>% .[order(.$clusters, .$age, .$d0, .$d42), ] # force the order to be human-compatible.
+
+```
+
+
+```{r seurat_dot_plot}
+library(Seurat)
+
+sce.seurat <- as.Seurat(sce, counts = "counts", data = "logcounts")
+
+####
+# Adjust parameters here:
+lfc <- 0.5
+pval.type <- "all" # 'any' means return highly ranked genes that are DE between group X and ANY OTHER group(s).
+fdr <- 0.25
+# Do not adjust below here.
+
+dot.plot.markers.up <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type,
+  direction = "up",
+  lfc=lfc, test.type ="t" )
+
+library(org.Hs.eg.db)
+# Map each list of markers to gene symbol:
+dot.plot.markers.up <- lapply(dot.plot.markers.up, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+#####
+
+# Wanted genes come from two places
+# 1. t-tests (above) - 2 genes from each.
+# 2. curated important B cell genes.
+
+dot.plot.markers.up.2 <- lapply(dot.plot.markers.up, function(x) {
+  x %>% .[!is.na(.$symbol), ] %>% head(3) 
+})
+
+wanted <- unlist(lapply(dot.plot.markers.up.2, rownames))
+
+labels <- unlist(lapply(dot.plot.markers.up.2, function(x) {x$symbol}))
+names(labels) <- wanted
+
+
+# curated genes:
+curated.selected <- c("FCRL5", "CD86", 
+                      "TBX21","BCL6","PRDM1","PAX5",
+                      "XRCC6","AICDA",
+            "CCR7", "SELL", "CXCR4",
+            "CXCR3", "TNFRSF13B",
+             "FCER2", "CD27", "CD24")
+
+curated.wanted <- mapIds(
+  org.Hs.eg.db,
+  keys=curated.selected,
+  keytype="SYMBOL", column="ENSEMBL", multiVals = "first")
+
+# Combine the two:
+wanted <- c(rev(wanted), curated.wanted)
+names(wanted) <- NULL
+
+names(curated.selected) <- curated.wanted
+
+labels <- c(rev(labels), curated.selected)
+
+# now plot:
+dots <- DotPlot(sce.seurat,
+        features = wanted,
+        group.by = "clusters",
+        scale.by = "size",
+        dot.scale = 4,
+        cols = c("lightgrey", "darkblue"))
+```
+
+```{r fig.keep="none"}
+# pseudotime plots
+
+library(destiny) # needs to be explicitly loaded before the RData
+load(file = "../cohort_2016_17/data/DiffusionMap.RData")
+dpt <- DPT(dm, tips = 2, w_width = 0.1)
+
+
+dptplot <- plot(dpt, root = 1,  divide = 3, paths_to = c(2,3), w_width = 0.1, dcs = 1:2, col_tip = "red")+
+        theme_pubr(legend = "none") + 
+        theme(axis.text = element_blank(), axis.ticks = element_blank()) + 
+        guides(colour = guide_colourbar()) +
+        guides(fill = guide_colourbar(title = "Diffusion\npseudotime")) +
+        theme(legend.position = "right", 
+              legend.key.width = unit(6,"points"), 
+              legend.key.height = unit(12,"points"), 
+              legend.direction = "vertical", 
+              legend.margin = margin(0,0,0,0, 'lines'),
+              aspect.ratio = 1)
+
+
+dptplot$layers[[1]] <- geom_point(
+  mapping = aes(fill = Colour), colour = "grey60" , shape = 21, alpha = 0.6) 
+
+```
+
+
+```{r run_SingleR}
+
+library(SingleR)
+mon.se <- MonacoImmuneData()
+
+counts <- logNormCounts(sce)
+
+
+# Change rownames from ENSG ID to symbols:
+library(org.Hs.eg.db)
+rownames(counts) <- mapIds(
+  org.Hs.eg.db,
+  keys=rownames(counts),
+  keytype="ENSEMBL", column="SYMBOL", multiVals = "first")
+
+# Remove any NA gene symbols:
+counts <- counts[ !isNA(rownames(counts)), ]
+
+# Predict - note we are using the 'fine' labels:
+pred <- SingleR(test = counts, ref = list(MON=mon.se), 
+                labels = list(MON=mon.se$label.fine))
+
+pred$shortlabels <- pred$labels
+pred$shortlabels %<>% gsub(., pattern = "Exhausted B cells", replacement = "IgD-CD27- Bmem")
+pred$shortlabels %<>% gsub(., pattern = "Naive B cells", replacement = "Naive")
+pred$shortlabels %<>% gsub(., pattern = "Non-switched memory B cells", replacement = "Non-switched Bmem")
+pred$shortlabels %<>% gsub(., pattern = "Switched memory B cells", replacement = "Switched Bmem")
+pred$shortlabels %<>% gsub(., pattern = "Plasmablasts", replacement = "Plasmablast")
+pred$shortlabels %<>% gsub(., pattern = "Plasmacytoid dendritic cells", replacement = "pDC")
+
+pred$shortlabels <- factor(pred$shortlabels,
+                           levels = c("Naive",
+                                      "Non-switched Bmem",
+                                      "Switched Bmem",
+                                      "IgD-CD27- Bmem",
+                                      "Plasmablast",
+                                      "pDC")) # a levels argument forces order for plots.
+
+
+sce$labels <- pred$shortlabels
+
+```
+
+
+```{r}
+####
+# human names for UMAP clusters
+####
+# PPP1R15A is GADD, a part of unfolded protein response:
+#https://www.sciencedirect.com/science/article/pii/S1535610813003565
+
+sce$named_clusters <- factor(
+  c("*FCRL5*+<br>B mem",
+    "*MALAT1*+<br>B mem",
+    "*LY9*+<br>B mem",
+    "naive",
+    "*MARCKS*+<br>B mem")[sce$clusters],
+    levels = 
+      c("*FCRL5*+<br>B mem",
+    "*MALAT1*+<br>B mem",
+    "*LY9*+<br>B mem",
+    "naive",
+    "*MARCKS*+<br>B mem"))
+
+abundance.data.for.ggpaired$named_clusters <- factor(
+  c("*FCRL5*+<br>B mem",
+    "*MALAT1*+<br>B mem",
+    "*LY9*+<br>B mem",
+    "naive",
+    "*MARCKS*+<br>B mem")[abundance.data.for.ggpaired$clusters],
+  levels = 
+  c("*FCRL5*+<br>B mem",
+    "*MALAT1*+<br>B mem",
+    "*LY9*+<br>B mem",
+    "naive",
+    "*MARCKS*+<br>B mem"))
+
+```
+
+
+```{r}
+tableau10medium = c("#729ECE", "#FF9E4A", "#67BF5C", "#ED665D",
+                               "#AD8BC9", "#A8786E", "#ED97CA", "#A2A2A2",
+                               "#CDCC5D", "#6DCCDA")
+
+library(rstatix)
+library(tidyverse)
+
+b <- abundance.data.for.ggpaired %>%
+  reshape2::melt(., value = c("d0", "d42"))
+colnames(b)[colnames(b) %in% c("variable")] <- "day"
+colnames(b)[colnames(b) %in% c("value")] <- "number"
+cor.pvals <- b %>% arrange(., age, clusters, PID) %>%
+  group_by(age, named_clusters) %>%
+  wilcox_test(number ~ day, paired = T) %>%
+  # adj P with bonferroni and n=5 (pipe above does not permit n adjustment)
+  # to do this p.adjust requires a vector of length 1
+  # if length >1, p.adjust tries to calculate n tests.
+  mutate(p.adj = unlist(lapply(.$p,
+                               function(X) p.adjust(X, method = "BH", n= 5)))
+         ) %>%
+  #adjust_pvalue(method = "BH") %>%
+  add_significance()
+
+cor.pvals <- cor.pvals %>% add_xy_position("day")
+
+cor.pvals$p.round <- signif(cor.pvals$p.adj, digits = 3)
+
+cowplot::plot_grid(
+  HM$gtable,
+  
+  cowplot::plot_grid(
+    
+    dots + 
+      scale_x_discrete(labels = labels) +
+      theme_pubr(legend = "right") +
+      xlab("Gene") + ylab("UMAP cluster") + 
+      rotate_x_text() + 
+      theme(legend.key.width = unit(12,"points"),
+            legend.key.height = unit(12,"points"),
+            legend.margin = margin(0,0,0,0, 'lines'),
+            legend.justification = "bottom",
+            axis.text.x = element_text(face = "italic", size = 10)) + 
+      guides(size = guide_legend(title = "% of cells\nexpressing"),
+             colour = guide_colorbar(title = "Scaled\nexpression", 
+                                     direction = "horizontal",
+                                     title.position = "top")),
+    
+    cowplot::plot_grid(
+      dptplot,
+      
+      plot(dpt,  root = 1,  divide = 3, 
+           col = as.numeric(sce[,sce$day == "d42"]$named_clusters), 
+           pal = tableau10medium[1:5], col_tip = "") + 
+        geom_point(mapping = aes(fill = Colour), colour = "grey60" , shape = 21, alpha = 0.6) +
+        theme_pubr(legend = "right") + 
+        guides(colour = guide_colourbar()) +
+        guides(fill = guide_legend(title = "UMAP\nclusters")) +
+        theme(axis.ticks = element_blank(),
+              axis.text = element_blank(),
+              legend.key.width = unit(6,"points"),
+              legend.key.height = unit(12,"points"),
+              legend.margin = margin(0,0,0,0, 'lines'),
+              aspect.ratio = 1),
+      
+      
+      ncol = 2, 
+      labels = c("C","D"),
+      rel_widths = c(1,1)),
+      
+    
+
+ggpaired(data = b, x= "day", y= "number", facet.by = c("age", "named_clusters"),
+         ylab = "# of cells", xlab = "",
+         line.color =  "grey",
+         color = "clusters", palette = tableau10medium) +
+  stat_pvalue_manual(cor.pvals, label = "p.round",
+                     y.position = 20,
+                     x = "xmin",
+                     # move p value label right by 25% of npc:
+                     position = position_nudge(x = 0.25),
+                     remove.bracket = T) + 
+  theme_pubr(legend = "none") +
+  theme(strip.background = element_rect(fill = NA),
+        strip.text = ggtext::element_markdown()),
+
+    ggscatter(data = DA,
+          x = "logFC", y = "neglog10FDR", facet.by = "group",
+          ylim =c(0,3), xlim = c(-3,3), color = "clusters", palette = tableau10medium, legend = "none",
+          ylab = "-log10(FDR)") +
+  geom_hline(yintercept = -log10(0.05), linetype = 2, col = "grey") +
+  geom_vline(xintercept = c(-0.5,0.5), linetype = 2, col = "grey") +
+    theme(strip.background = element_rect(fill = NA)),
+  
+  ncol = 1,
+  rel_heights = c(2,1,1.5,1),
+  labels = c("B","","E","F")),
+  
+  ncol = 2, rel_widths = c(1,2),
+  labels = c("A", ""))
+
+
+```
+\newpage
+
+__Figure 2 – Transcriptional landscape is altered between young and old HA-specific memory B cells__
+
+(A) Heatmap showing expression of the top 15 features from t-tests distinguishing a UMAP cluster from _any_ other cluster (FDR<0.01, log2 fold change>2). Each row is a feature (n=`r length(top10feats)`) and its gene symbol is shown. Each column is a single cell (n=`r ncol(sce)`). Cells are ordered by UMAP cluster, as shown in the color bar above the heatmap. The 15 features with the larged fold-changes were selected with tied positions allowed, and a feature could appear in more than one comparison. Features that did not map to a gene symbol and duplicated features were removed prior to plotting. Log2 expression values are row-normalized and centered.
+(B) Dotplot showing the expression of selected genes in each UMAP cluster. The size of the dot reflects the proportion of cells within that cluster which express the gene of interest. The color of each dot is scaled according to the scaled normalised expression of the given gene in that cluster. Genes were selected as follows: the top 2 genes from a t-test comparison between each cluster from all other clusters (L2FC>0.5, FDR<0.25); biologically relevant B cell genes - selected genes from (A), B cell transcription factors, DNA repair proteins, B cell chemokine receptors and other B cell surface receptors.
+(C) Diffusion co-efficient (DC) based pseudotime analysis from A/Cal09-specific B cells from day 42. Cells are shaded based on their position in pseudotime. Nodes are plotted in red and paths are shown by straight lines.
+(D) Pseudotime analysis as in (C), with colors determined by the UMAP clusters in (A) and defined in Figure 1.
+(E) Boxplots of the numbers of cells within each UMAP cluster comparing day 0 and day 42 cell numbers sorted for `r levels(ALFNA16$Age.Group)[1]` year old and `r levels(ALFNA16$Age.Group)[2]` year old individuals. UMAP clusters are named by putative surface marker genes shown in (B). Clusters are labelled with putative surface marker genes shown in (B). *P* values from 2 tailed paired Mann-Whitney tests are shown, after Benjamini-Hochberg correction for 5 tests.
+(F) Volcano plots from differential abundance analysis for the whole study ('all'), or the two age groups individually. Shown are -log10 (Benjamini-Hochberg) FDR and log2 fold change (L2FC). Grey dashed lines are plotted at -log10(0.05) and at L2FC±0.5.
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

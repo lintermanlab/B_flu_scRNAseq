@@ -1,0 +1,311 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 8, fig.height = 4, tidy.opts=list(width.cutoff=60))
+```
+
+```{r SCE_load}
+
+# SingleCellExperiment load
+
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(magrittr) # for %<>% operator.
+library(MultiAssayExperiment) # for the HAI titre panels
+
+load("../cohort_2016_17/data/SCE_incl_NTC.RData")
+
+```
+
+```{r QC_plots}
+# Remove the known NTC wells
+# these wells already have low counts/features so would get excluded anyway
+# but they skew MAD calculations, so affect which 'borderline' cells are also excluded.
+sce <- sce[ , !is.na(sce$PID) ]
+
+
+# Calculate QC stats:
+qcstats <- perCellQCMetrics(sce, subsets=list(Mito=is.mito))
+
+# Define the groups WITHIN which to determine median and 3xMADs: 
+sce$phenotype <- paste(sce$age, sce$day, sep =" ")
+
+# And tidy labels for plots:
+sce$phenotype2plot <- sce$phenotype
+sce$phenotype2plot %<>% gsub(., pattern = "old", replacement = "67-86 yo")
+sce$phenotype2plot %<>% gsub(., pattern = "young", replacement = "22-36 yo")
+
+
+# Identify QC fails:
+batch.4grp.reasons <- quickPerCellQC(qcstats, percent_subsets=c("subsets_Mito_percent", "percent_top_50"), batch=sce$phenotype)
+
+# Table to explain QC fail distribution:
+fail.reasons <- colSums(as.matrix(batch.4grp.reasons))
+
+# Now to plot the QC metrics, highlighting pass/fails:
+
+sce <- addPerCellQC(sce, subsets=list(Mito=is.mito))
+sce$qc_fail <- batch.4grp.reasons$discard
+
+# Replace the long, full text 'lib_plate' with A-J:
+sce$library <- LETTERS[1:10][sce$lib_plate]
+
+sce.full <- sce
+
+
+```
+
+
+```{r cells_per_condition_post_QC}
+load("../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+
+# Make a phenotype factor combining age + day
+sce$phenotype <- paste(sce$age, sce$day, sep =" ")
+
+# Extract the number of cells that each individual contributes at each timepoint:
+dataqc.by.day <- table(sce[,!is.na(sce$PID)]$day, sce[,!is.na(sce$PID)]$PID)
+
+dataqc.by.age <- table(sce[,!is.na(sce$PID)]$age, sce[,!is.na(sce$PID)]$PID)
+
+
+longdataqc <- reshape2::melt(dataqc.by.day)
+colnames(longdataqc) <- c("day", "PID", "number_of_cells")
+
+longdataqc$age <- ifelse(longdataqc$PID %in% colnames(dataqc.by.age)[dataqc.by.age["young",] != 0], 
+   "young", "old")
+longdataqc$age <- factor(longdataqc$age,levels = c("young", "old"))
+
+
+
+library(dplyr) # for the pipe below.
+
+a <- longdataqc %>%
+   as.tbl() %>%
+   group_by(age, day) %>%
+   dplyr::mutate(percentage_of_cells = number_of_cells / sum(number_of_cells) )
+
+
+# Make a grouping variable called 'col' that is used for colours:
+a <- a %>% ungroup() %>%
+  arrange(age, PID) %>%
+  mutate(col = rep(rep(LETTERS[1:10], each = 2), 2))
+
+# Activate a palette:
+pal <- RColorBrewer::brewer.pal(10, "Set3")
+
+# Repair age.
+a$age <- factor(ifelse(a$age == "old", "67-86yo", "22-36yo"))
+
+```
+
+
+```{r load_data_for_UMAP_to_exclude_PBs}
+
+# Although these plots appear halfway through the figure,
+# they use the currently loaded SCE object.
+# All of the other plots use SCE-derived objects.
+# So we call this chunk last, to ensure we are plotting UMAP from the correct SCE.
+
+# Load libraries:
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+
+# Check we've got the relevant SingleCellExperiment object (the QC +ve cells)
+load(file = "../cohort_2016_17/data/SCE_QC_pass.RData")
+
+# Normalisation by deconvolution
+library(scran)
+set.seed(100)
+clust <- quickCluster(sce) 
+# table(clust)
+deconv.sf <- calculateSumFactors(sce, cluster=clust)
+# summary(deconv.sf)
+
+sce <- computeSumFactors(sce, cluster=clust, min.mean=0.1)
+sce <- logNormCounts(sce)
+
+
+# Select 25% of genes with largest variance
+dec <- modelGeneVar(sce)
+hvg <- getTopHVGs(dec, prop=0.25)
+
+set.seed(10000)
+sce <- runPCA(sce, ncomponents=50, subset_row=hvg)
+set.seed(100000)
+sce <- runUMAP(sce, dimred = 'PCA', external_neighbors=TRUE)
+
+# Clustering.
+set.seed(1000000)
+g <- buildSNNGraph(sce, use.dimred = 'PCA')
+set.seed(10000000)
+sce$clusters <- factor(igraph::cluster_louvain(g)$membership)
+
+
+# So there is always 1 cluster whose row has 9 zeros in
+# Let's select that programmatically.
+cluster.selector <- table(Cluster=sce$clusters, Batch=sce$library)
+cluster.to.discard <- c(1:nlevels(sce$clusters))[apply(cluster.selector, 1, function(x) sum(x == 0)) == 9]
+
+
+# A simple way to remove the legend titles:
+plotUMAP_legends <- function(...) { plotUMAP(...) + ggpubr::theme_pubr() +
+    xlab("UMAP1") + ylab("UMAP2") + 
+    theme(axis.ticks = element_blank(), 
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          legend.position = "top", legend.direction = "vertical")}
+
+
+```
+
+```{r plots, fig.height=9.5}
+library(ggpubr)
+
+cowplot::plot_grid(
+   
+   # All the QC plots in 1 column:
+   cowplot::plot_grid(
+   
+    plotColData(sce.full, x="library", y="sum", colour_by="qc_fail",
+        other_fields="phenotype2plot") + facet_wrap(~phenotype2plot) + 
+        scale_y_log10() + ylab("# of reads") + theme(legend.position = "none"),
+    plotColData(sce.full, x="library", y="detected", colour_by="qc_fail", 
+        other_fields="phenotype2plot") + facet_wrap(~phenotype2plot) + 
+        scale_y_log10() + ylab("# of detected\ntranscripts") + theme(legend.position = "none"),
+    plotColData(sce.full, x="library", y="subsets_Mito_percent", 
+        colour_by="qc_fail", 
+        other_fields="phenotype2plot") + facet_wrap(~phenotype2plot) + 
+        ylab("% mitochondrial\nreads") + theme(legend.position = "none"),
+    plotColData(sce.full, x="library", y="percent_top_50", 
+        colour_by="qc_fail",
+        other_fields="phenotype2plot") + facet_wrap(~phenotype2plot) +
+      ylab("% of library\noccupied by top 50 genes") + theme(legend.position = "none"),
+       labels = LETTERS[1:4],align = "hv", vjust = 1,
+    ncol=1
+),
+  # All the post-QC cells/ condition plots
+cowplot::plot_grid(
+   
+# All surface markers:
+cowplot::plot_grid(
+  plotUMAP(sce, colour_by="clusters", add_legend = F) +  
+    theme_pubr() +
+    guides(fill = guide_legend(title = "Louvain\ncluster",
+                               title.position = "top")) +
+    xlab("UMAP1") + ylab("UMAP2") +
+    theme(axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          legend.position = "top"),
+
+  # RNASeq
+  plotUMAP_legends(sce, colour_by="ENSG00000057657") +
+    scale_fill_viridis_c(name = "PRDM1\nRNA") +
+    guides(fill = guide_colourbar(title.position = "left")), # PRDM1
+  plotUMAP_legends(sce, colour_by="ENSG00000137265") +
+    scale_fill_viridis_c(name = "IRF4 RNA")  +
+    guides(fill = guide_colourbar(title.position = "left")), # IRF4
+  plotUMAP_legends(sce, colour_by="ENSG00000100219") +
+    scale_fill_viridis_c(name = "XBP1\nRNA")  +
+    guides(fill = guide_colourbar(title.position = "left")), # XBP1
+  
+  # Index sort information
+  plotUMAP_legends(sce, colour_by="CD38.BV421")  + 
+    viridis::scale_fill_viridis(option="inferno") + 
+    labs(fill = "Surface\nCD38") +
+    theme_pubr() + 
+    theme(legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          axis.ticks = element_blank(),
+          axis.text = element_blank()),
+  plotUMAP_legends(sce, colour_by="CD20.BV605") + 
+    viridis::scale_fill_viridis(option="inferno") + 
+    labs(fill = "Surface\nCD20") +
+    theme_pubr() +
+    theme(legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          axis.ticks = element_blank(),
+          axis.text = element_blank()),
+
+  labels = LETTERS[5:10],
+  ncol = 3),
+   
+   # Post-QC cells / condition
+cowplot::plot_grid(
+   ggstripchart(data = a, x = "age", y = "number_of_cells", facet.by = "day", palette = pal, legend = "none",
+                fill = "col", shape = c(21,24)[a$age], size = 2,
+                xlab = "",
+                add = "median_mad",add.params = list(width = 0.5), error.plot = "crossbar", ylab = "# of cells") +
+     ylim(-5,60) + 
+     scale_x_discrete(labels = c("22-36", "67-86")) + rotate_x_text() +
+     theme(strip.background = element_rect(fill = NA)) + 
+     
+      stat_compare_means(method = "wilcox.test", label.x.npc = "left", label.y.npc = 0.9, paired = F,
+                         aes(label = paste0("p=", ..p.format..))),
+
+   ggbarplot(a, y= "percentage_of_cells", x = "age", facet.by = "day",
+             xlab = "",
+          fill = "col",palette = pal, legend = "none", ylab = "\nProportion of cells") +   
+     scale_x_discrete(labels = c("22-36", "67-86")) + rotate_x_text() +
+     theme(strip.background = element_rect(fill = NA)),
+
+ 
+   labels = LETTERS[11:12],
+ncol = 2),
+
+   ncol = 1, rel_heights = c(4,2)),
+ncol = 2,
+rel_widths = c(4,6))
+```
+\newpage
+__Supplementary figure 2: Single cell RNA sequencing quality control__
+
+(A) The number of reads per cell (n=`r ncol(sce.full)`) cellsplotted on a log10 scale for each library, with the 4 experimental conditions (22-36 year old at day 0; 22-36 year old at day 42; 67-86 year old at day 0; 67-86 year old at day 42) shown separately.
+(B) The number of detected transcripts per cell plotted as in (A) plotted on a log10 scale for each library, with the 4 experimental conditions shown separately.
+(C) The percentage of detected mitochondrial transcripts per cell plotted as in (A).
+(D) The percentage of reads per cell that are attributable to the 50 most highly expressed features. Cells with high values represent low complexity libraries.
+(E) UMAP plot of transcriptomes of single HA-binding B cells, after QC, n=`r ncol(sce)` cells. The first 50 principal components were calculated with features selected by the top 25% of variance, after normalisation for library size using deconvolution. 
+For (F)-(J) UMAP embedding as in (E), with the following:
+(F) Expression level of _PRDM1_
+(G) Expression level of _IRF4_
+(H) Expression level of _XBP1_
+(I) logicle fluorescence intensity of surface CD38 protein.
+(J) logicle fluorescence intensity of surface CD20 protein.
+(K) The number of cells, that pass transcriptomic QC, and are not plasma cells (E-J) for 22-36yo and 67-86yo individuals at day 0 and day 42, `r sum(a$number_of_cells)` cells. The median and median absolute deviations, and *P* values from 2 tailed Mann-Whitney tests are shown. Each individual is identifiable by their plotted shape and its colour. There is 1 22-36yo individual (purple circle), who only provides cells only at day 42 and one 67-86yo individual (pink triangle) who only provides cells at day 42. 
+(L) The percentage of each condition's cells, after transcriptomic QC, that each individual contributes is plotted.
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

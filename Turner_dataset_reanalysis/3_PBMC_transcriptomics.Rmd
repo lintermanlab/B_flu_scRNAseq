@@ -1,0 +1,332 @@
+---
+title: "PBMC transcriptomics"
+author: "Ed Carr, Linterman lab"
+date: "6 Jan 2020"
+output: 
+  pdf_document: 
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+```{r read_into_Seurat, echo=TRUE, eval=FALSE}
+
+library(Seurat)
+########
+# Wrapper function
+# Read in each sample, annotate with day
+SRRs2Seurat <- function(x) {
+  data <- Read10X(data.dir = as.character(x$path))
+  obj <- CreateSeuratObject(data, 
+                            project = 
+                              "PBMC")
+                            
+  obj <- AddMetaData(obj, metadata = c(as.character(x$day), 
+                                       x$lib,
+                                       paste(
+                                         as.character(x$day), 
+                                    x$lib, sep = "_")
+                                    ),
+                     col.name = c("day", "lib","day_lib"))
+  
+  # % mito reads
+  obj[["percent.mt"]] <- PercentageFeatureSet(obj, pattern = "^MT-")
+  
+  # simple QC: >200 features/cell, less than 7k features/cell and <12.5% mitochondrial reads.
+  obj <- subset(obj, subset = nFeature_RNA > 200 & nFeature_RNA < 7000 & percent.mt < 12.5)
+}
+#########
+
+# Build a dataframe with sample annotation:
+
+SRRtable <- cbind("path" = c("cellranger/TurnerSRR11233662/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233620/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233619/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233618/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233617/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233661/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233660/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233659/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233658/outs/filtered_feature_bc_matrix/",
+                             "cellranger/TurnerSRR11233657/outs/filtered_feature_bc_matrix/"),
+                  "day" = c("d60",
+                            "d0",
+                            "d5",
+                            "d12",
+                            "d28",
+                            "d0",
+                            "d5",
+                            "d12",
+                            "d28",
+                            "d60"),
+
+
+                  "lib" = c("PBMC",
+                            "PBMC",
+                            "PBMC",
+                            "PBMC",
+                            "PBMC",
+                            "IgD_negative_enriched_PBMC",
+                            "IgD_negative_enriched_PBMC",
+                            "IgD_negative_enriched_PBMC",
+                            "IgD_negative_enriched_PBMC",
+                            "IgD_negative_enriched_PBMC"))
+
+
+SRRtable <- data.frame(SRRtable)
+SRRtable
+
+SRRtable$day <- factor(SRRtable$day, levels = c("d0", "d5", "d12", "d28", "d60"))
+
+
+
+
+
+# Make a list
+pbmc.list <- list()
+
+## we know from the VDJ_fate_mapping analysis that we need to focus on IgD- enriched B cells (as these share clonotypes with GC B cells.)
+
+## This imports just the IgD- samples:
+SRRtable <- SRRtable[SRRtable$lib == "IgD_negative_enriched_PBMC",]
+
+# Loop for each entry in SRR table to do the import to Seurat.
+for(i in 1:nrow(SRRtable)){
+
+  pbmc.list[[i]] <- SRRs2Seurat(SRRtable[i,])
+  
+}
+
+names(pbmc.list) <- paste(SRRtable$day, SRRtable$lib, sep = "_")
+
+```
+
+
+```{r logNorm_integrationWithAnchors, echo=TRUE, eval=FALSE}
+
+
+for (i in 1:length(pbmc.list)) {
+    pbmc.list[[i]] <- NormalizeData(pbmc.list[[i]], verbose = FALSE)
+    pbmc.list[[i]] <- FindVariableFeatures(pbmc.list[[i]], selection.method = "vst", 
+        nfeatures = 2000, verbose = FALSE)
+}
+
+
+# Set reference as a day 28 sample (will have some GC-B derived, and all other cell types)
+# (the Seurat vignette keeps one dataset back to 'project' anchors onto)
+reference.list <- which (names(pbmc.list) == "d28_IgD_negative_enriched_PBMC")
+
+# Find anchors:
+pbmc.anchors <- FindIntegrationAnchors(object.list = pbmc.list, normalization.method = "LogNormalize", reference = reference.list, dims = 1:30)
+
+pbmc.integrated <- IntegrateData(anchorset = pbmc.anchors, dims = 1:30)
+
+save(pbmc.integrated, file = "seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated.RData")
+```
+
+```{r}
+
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+
+load("seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated.RData")
+
+# switch to integrated assay. The variable features of this assay are automatically
+# set during IntegrateData
+DefaultAssay(pbmc.integrated) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+pbmc.integrated <- ScaleData(pbmc.integrated, verbose = FALSE)
+pbmc.integrated <- RunPCA(pbmc.integrated, npcs = 20, verbose = FALSE)
+
+pbmc.integrated <- FindNeighbors(pbmc.integrated, dims = 1:20)
+pbmc.integrated <- FindClusters(pbmc.integrated, resolution = 0.05) # Turner used 0.2.
+
+pbmc.integrated <- RunUMAP(pbmc.integrated, reduction = "pca", dims = 1:20)
+p1 <- DimPlot(pbmc.integrated, reduction = "umap", group.by = "day")
+p2 <- DimPlot(pbmc.integrated, reduction = "umap", group.by = "seurat_clusters")
+p1 + p2
+
+```
+
+```{r}
+
+# identify B cells
+# Should use the 'RNA' assay for visualisation like this.
+
+DefaultAssay(pbmc.integrated) <- "RNA"
+# Normalize RNA data for visualization purposes
+pbmc.integrated <- NormalizeData(pbmc.integrated, verbose = FALSE)
+
+## Turner et al. use these markers for PBMC/FNA cluster assignment:
+markers.to.plot <- c("MS4A1", "CD19", "CD79A","CD3D", "CD3E", "CD3G", "IL7R", "CD4", "CD8A","GZMB", "GNLY", "NCAM1", "CD14", "LYZ", "CST3", "MS4A7", "IL3RA", "CLEC4C", "PPBP")
+
+
+DotPlot(pbmc.integrated, features = c(markers.to.plot)) + ggpubr::rotate_x_text()
+
+# Which clusters are B cells
+pbmc.B <- subset(pbmc.integrated, idents = c("0", "1", "3", "5"))
+
+# Turner et al check for housekeeping genes:
+#DotPlot(pbmc.integrated, features = c("ACTB", "GAPDH", "B2M", "HSP90AB1", "GUSB", "PPIH", "PGK1", "TBP", "TFRC", "SDHA", "LDHA"))
+
+# Save B cells
+DefaultAssay(pbmc.B) <- "integrated" # set explicitly, so we re-cluster on integrated anchors.
+save(pbmc.B, file = "seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated_just_B_cells.RData")
+
+```
+
+```{r}
+
+load("seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated_just_B_cells.RData")
+
+DefaultAssay(pbmc.B) <- "integrated" # set explicitly, so we re-cluster on integrated anchors.
+
+# Run the standard workflow for visualization and clustering
+pbmc.B <- ScaleData(pbmc.B, verbose = FALSE)
+pbmc.B <- RunPCA(pbmc.B, npcs = 20, verbose = FALSE)
+
+pbmc.B <- FindNeighbors(pbmc.B, dims = 1:20)
+pbmc.B <- FindClusters(pbmc.B, resolution = 0.05) # Turner used 0.2, for this integration approach 0.05 gives biologically relevant clusters.
+
+pbmc.B <- RunUMAP(pbmc.B, reduction = "pca", dims = 1:20)
+
+# Re-factor the 'day' so its in numerical order:
+pbmc.B$day <- factor(pbmc.B$day, levels = c("d0", "d5", "d12", "d28", "d60"))
+
+# Make a new factor, where the levels include the number of cells @ each day.
+pbmc.B$day_label <- factor(paste0(
+  levels(pbmc.B$day),"\n", summary(pbmc.B$day), " cells")[ as.numeric(pbmc.B$day) ])
+
+# fix the order:
+pbmc.B$day_label <- factor(pbmc.B$day_label, levels = 
+                             levels(pbmc.B$day_label)[
+  order(as.numeric(
+    gsub(levels(pbmc.B$day_label), pattern = "d|\n.*$", replacement = "")))
+  ])
+
+
+b1 <- DimPlot(pbmc.B, reduction = "umap", split.by = "day_label")
+b2 <- DimPlot(pbmc.B, reduction = "umap", group.by = "seurat_clusters")
+b1 + b2
+
+# Turner definitions
+gcb.markers <- c("BCL6", "RGS13", "MEF2B", "STMN1", "ELL3", "SERPINA9")
+
+
+DefaultAssay(pbmc.B) <- "RNA"
+b3 <- DotPlot(pbmc.B, features = c( "TCL1A", "IL4R", "CCR7", "IGHM", "IGHD",
+                                   gcb.markers, 
+                                     "XBP1", "IRF4", "SEC11C", "FKBP11", "JCHAIN", "PRDM1", 
+                                   "TNFRSF13B", "CD24", "CD27", "TBX21", "FCRL5", "ITGAX", "NKG7", "ZEB2", "CR2")) + ggpubr::rotate_x_text()
+
+#b1 + b2 + b3
+#b2 + b3
+#FeaturePlot(fna.B, features = "CXCR4")
+cowplot::plot_grid(b2,b3, rel_widths = c(1,2))
+
+### Annotate clusters based on the dotplot:
+
+pbmc.B <- RenameIdents(pbmc.B, '0' = "mem resting", '1' = "mem active", '2' = "naive", '3' = "plasma cell")
+
+pbmc.B$cell_type <- Idents(pbmc.B)
+
+b1 <- DimPlot(pbmc.B, reduction = "umap", split.by = "day_label")
+b1
+
+library(tidyverse)
+
+
+#as_tibble(pbmc.B[[]]) %>% mutate("day" = factor(day, levels = c("d0","d5","d12","d28","d60"))) %>% ggplot(aes(day,  fill = cell_type)) + geom_bar(position = "fill") + ylab("Proportion") + ggpubr::theme_pubr()
+```
+
+
+
+```{r}
+# d28
+load("R_results_objects/barcodes_for_IgD_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+
+# d60
+load("R_results_objects/barcodes_for_IgD_d60_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+
+
+# Make a list of barcodes:
+## Some of these rows have >1 barcode associated with it, where BCRs are identical between GEMs.
+barcodes.d28 <- unlist(strsplit(filt.IgD.d28$Barcode, ";"))
+
+barcodes.d28 <- paste0(barcodes.d28, "_4") # the d28 sample barcodes are appended with '_4' By Seurat on import.
+
+summary(barcodes.d28 %in% rownames(pbmc.integrated@meta.data)) # 38 cells are found; 1 cell is not (this cell presumably fails the QC at the start)
+summary(barcodes.d28 %in% rownames(pbmc.B@meta.data)) # 38 cells are found, AND are B cells; 1 cell is not (this cell presumably fails the QC at the start)
+
+barcodes.d60 <- unlist(strsplit(filt.IgD.d60$Barcode, ";"))
+barcodes.d60 <- paste0(barcodes.d60, "_5")
+summary(barcodes.d60 %in% rownames(pbmc.integrated@meta.data)) # 8 cells are found
+summary(barcodes.d60 %in% rownames(pbmc.B@meta.data)) # 8 cells are found, AND are B cells
+
+# Make a factor in the metadata of the Seurat object.
+pbmc.B$GC_related_BCR <- factor("N", levels = c("Y", "N"))
+
+#pbmc.B$GC_related_BCR[rownames(pbmc.B@meta.data) %in% barcodes.d60] <- "Y"
+pbmc.B$GC_related_BCR[rownames(pbmc.B@meta.data) %in% barcodes.d28] <- "Y"
+
+
+# We want to plot just day 28
+pbmc.B.d28 <- subset(pbmc.B, day == "d28") 
+
+pbmc.B.d28$GC_related_BCR_label <- paste0(
+  levels(pbmc.B.d28$GC_related_BCR),"\n",summary(pbmc.B.d28$GC_related_BCR)," cells")[pbmc.B.d28$GC_related_BCR]
+
+
+b4 <- DimPlot(pbmc.B.d28, reduction = "umap", split.by = "GC_related_BCR_label", pt.size = 1)
+#b2 + b4
+b4
+
+DefaultAssay(pbmc.B.d28) <- "RNA"
+# If you use 'split.by' to make categories for dotplot, the colour scale is lost.
+# If we combine cell_type and GC_related_BCR into the Idents(), we can avoid using split.by
+pbmc.B.d28.forDotplot <- pbmc.B.d28
+Idents(pbmc.B.d28.forDotplot) <- paste(Idents(pbmc.B.d28.forDotplot),
+                                        pbmc.B.d28.forDotplot$GC_related_BCR)
+# Idents() contains a factor, so we want to force the levels to be alphabetical.
+Idents(pbmc.B.d28.forDotplot) <- factor(Idents(pbmc.B.d28.forDotplot), levels = levels(Idents(pbmc.B.d28.forDotplot))[order(levels(Idents(pbmc.B.d28.forDotplot)))])
+
+b5 <- DotPlot(pbmc.B.d28.forDotplot, features = c( "TCL1A", "IL4R", "CCR7", "IGHM", "IGHD",
+                                   gcb.markers, 
+                                     "XBP1", "IRF4", "SEC11C", "FKBP11", "JCHAIN", "PRDM1", 
+                                   "TNFRSF13B", "CD24", "CD27", "TBX21", "FCRL5", "ITGAX", "NKG7", "ZEB2", "CR2")) + ggpubr::theme_pubr() + ggpubr::rotate_x_text() 
+
+b6 <- as_tibble(pbmc.B.d28[[]]) %>% 
+  ggplot(aes(GC_related_BCR, fill = cell_type)) + 
+  geom_bar(position = "fill") + 
+  ylab("Proportion of B cells") + 
+  xlab("GC related BCR") + 
+  ggpubr::rotate() + 
+  ggpubr::theme_pubr() +
+  guides(fill = guide_legend(title = "", ncol =2))
+
+cowplot::plot_grid(b1,b4, b5, b6, ncol = 2, rel_widths = c(4,3))
+
+
+```
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

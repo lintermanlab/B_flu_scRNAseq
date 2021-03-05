@@ -1,0 +1,192 @@
+---
+title: "SCE assembly for the 2016-17 cohort"
+author: "EJC"
+date: "25/06/2020, based on code from May 2019"
+output: 
+  pdf_document: 
+    keep_tex: no
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+The Babraham compute cluster does not contain a global tex installation, so a local tex is added to $PATH to allow knitting to pdf.
+
+```{r}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = T, tidy = T, warning = F, message = T, fig.width = 7, fig.height = 4.5, tidy.opts=list(width.cutoff=60))
+```
+
+# Load QC-pass SCE
+
+```{r get_sce}
+load(file = "data/SCE_QC_pass.RData")
+```
+
+# Normalise by deconvolution, PCA, UMAP, find PB cluster and remove
+
+For convenience PCA + UMAP on the final SCE is re-run (to avoid needing to re-run it for each figure.Rmd).
+
+```{r}
+library(SingleCellExperiment)
+library(scran)
+library(scater)
+
+# Normalisation by deconvolution
+
+set.seed(100)
+clust <- quickCluster(sce) 
+# table(clust)
+deconv.sf <- calculateSumFactors(sce, cluster=clust)
+# summary(deconv.sf)
+
+sce <- computeSumFactors(sce, cluster=clust, min.mean=0.1)
+sce <- logNormCounts(sce)
+
+# Select 25% of genes with largest variance
+dec <- modelGeneVar(sce)
+hvg <- getTopHVGs(dec, prop=0.25)
+
+set.seed(10000)
+sce <- runPCA(sce, ncomponents=50, subset_row=hvg)
+set.seed(100000)
+sce <- runUMAP(sce, dimred = 'PCA', external_neighbors=TRUE)
+
+# Clustering.
+set.seed(1000000)
+g <- buildSNNGraph(sce, use.dimred = 'PCA')
+set.seed(10000000)
+sce$clusters <- factor(igraph::cluster_louvain(g)$membership)
+
+
+# So there is always 1 cluster whose row has 9 zeros in
+# Let's select that programmatically.
+cluster.selector <- table(Cluster=sce$clusters, Batch=sce$library)
+cluster.to.discard <- c(1:nlevels(sce$clusters))[apply(cluster.selector, 1, function(x) sum(x == 0)) == 9]
+
+# Discard the PB cluster, then re-do analysis:
+## The PB cluster is so different, that % hvg or # PCs does not influence their clustering apart
+sce <- sce[, ! sce$clusters == cluster.to.discard]
+
+set.seed(100)
+clust <- quickCluster(sce) 
+# table(clust)
+deconv.sf <- calculateSumFactors(sce, cluster=clust)
+# summary(deconv.sf)
+
+sce <- computeSumFactors(sce, cluster=clust, min.mean=1)
+sce <- logNormCounts(sce)
+
+# Select 10% of genes with largest variance
+dec <- modelGeneVar(sce)
+hvg <- getTopHVGs(dec, prop=0.10)
+
+set.seed(10000)
+sce <- runPCA(sce, ncomponents=40, subset_row=hvg)
+set.seed(100000)
+sce <- runUMAP(sce, dimred = 'PCA', external_neighbors=TRUE)
+
+# Clustering.
+set.seed(1000000)
+g <- buildSNNGraph(sce, use.dimred = 'PCA')
+set.seed(10000000)
+sce$clusters <- factor(igraph::cluster_louvain(g)$membership)
+```
+
+`r sum(cluster.selector[cluster.to.discard, ])` cells within the plasmablast cluster are removed - see the supplementary figure Rmd/pdf to see feature plots supporting their identification as plasmablasts.
+
+
+# Plot SCE
+
+```{r}
+library(ggpubr)
+
+cowplot::plot_grid(
+plotUMAP(sce, colour_by="clusters") + 
+     theme_pubr(legend = "right") + 
+     guides(fill = guide_legend(title = "Louvain\ncluster",
+                                title.position = "top")) + 
+     theme(legend.key.size = unit(0, 'lines'),
+           legend.margin = margin(0,0,0,0, 'lines'),
+           aspect.ratio = 1) + rotate_x_text(),
+
+cowplot::plot_grid(
+  # UMAP both day 0 and day 42
+  # Colours from index flow IgD
+  plotUMAP(sce, colour_by="IgD.BUV737") +
+    viridis::scale_fill_viridis(option="inferno") + 
+    labs(fill = "Surface\nIgD") +
+    theme_pubr() + 
+    theme(legend.position = "right",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+  plotUMAP(sce, colour_by="CD27.BV711") + 
+    viridis::scale_fill_viridis(option="inferno") +
+     labs(fill = "Surface\nCD27") +
+     theme_pubr() +
+     theme(legend.position = "right",
+           axis.ticks = element_blank(),
+           axis.text = element_blank(),
+           legend.key.width = unit(6,"points"),
+           legend.key.height = unit(12,"points"),
+           legend.margin = margin(0,0,0,0, 'lines'),
+           aspect.ratio = 1),
+  
+  # UMAP both day 0 and day 42
+  # Colours from index flow CD21
+  plotUMAP(sce, colour_by="CD21.PE.cy7") +
+    viridis::scale_fill_viridis(option="inferno") +
+    labs(fill = "Surface\nCD21") +
+    theme_pubr() +
+    theme(legend.position = "right",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+  
+  # UMAP both day 0 and day 42
+  # Colours from index flow CD28
+  plotUMAP(sce, colour_by="CD38.BV421") + 
+    viridis::scale_fill_viridis(option="inferno") +
+    labs(fill = "Surface\nCD38") +
+    theme_pubr() +
+    theme(legend.position = "right",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+  
+  ncol = 2),
+ncol = 2)
+```
+
+# Save final SCE: NTC removed, QC passing cells, plasmablasts removed, with dimensionalty reduction pre-calculated
+
+```{r}
+
+save(sce, file = "data/SCE_QC_pass_finalised.RData")
+
+```
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

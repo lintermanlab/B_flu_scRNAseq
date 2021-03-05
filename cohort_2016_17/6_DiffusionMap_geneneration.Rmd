@@ -1,0 +1,103 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r load_data}
+
+load(file = "data/SCE_QC_pass_finalised.RData")
+
+```
+
+```{r select_d42}
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+##
+#
+# Select just day 42
+#
+##
+sce <- sce[, sce$day == "d42"]
+
+```
+
+```{r}
+library(destiny)
+
+set.seed(1)
+
+dm <- DiffusionMap(sce, distance = "euclidean", n_pcs = 10)
+            
+```
+
+```{r}
+
+save(dm, file = "data/DiffusionMap.RData")
+
+```
+       
+Some brief plots here (see the main figure .Rmd for polished versions).
+
+```{r}
+tmp <- data.frame(DC1 = eigenvectors(dm)[,1],
+                  DC2 = eigenvectors(dm)[,2],
+                  DC3 = eigenvectors(dm)[,3],
+                  DC4 = eigenvectors(dm)[,4],
+                  UMAPcluster = sce$clusters,
+                  day = sce$day,
+                    age = sce$age,
+                  phenotype = sce$phenotype)
+library(ggplot2)
+plot1 <- ggplot(tmp, aes(x = DC1, y = DC2, colour = UMAPcluster, shape = phenotype)) +
+    geom_point() + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 2") +
+    theme_classic() +
+  ggtitle("d42, DC1 vs 2")
+
+plot1a <- ggplot(tmp, aes(x = DC1, y = DC3, colour = UMAPcluster, shape = phenotype)) +
+    geom_point() + 
+    xlab("Diffusion component 1") + 
+    ylab("Diffusion component 3") +
+    theme_classic() +
+  ggtitle("d42, DC1 vs 3")
+
+
+plot1b <- ggplot(tmp, aes(x = DC2, y = DC3, colour = UMAPcluster, shape = phenotype)) +
+    geom_point() + 
+    xlab("Diffusion component 2") + 
+    ylab("Diffusion component 3") +
+    theme_classic() +
+  ggtitle("d42, DC2 vs 3")
+
+cowplot::plot_grid(plot1, plot1b, plot1a)
+```
+
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

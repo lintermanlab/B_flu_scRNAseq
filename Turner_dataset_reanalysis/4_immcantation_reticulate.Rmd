@@ -1,0 +1,283 @@
+---
+title: "Immuncantation reticulation"
+author: "Ed Carr, Linterman lab"
+date: "12 Jan 2020"
+output: 
+  pdf_document: 
+editor_options: 
+  chunk_output_type: console
+---
+
+# Motivation
+
+This Rmd will download, install and execute IgBLAST (IGMT references) and Immcantation suite.
+
+Downloading the Immcantation docker image would probably be as effective, if you're more familiar with Docker.
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+```{r}
+# Use conda + bioconda to install IgBLAST
+# Note that v1.15 is specified
+# Advantage here is that IgBLAST is preconfigured > v1.13 (it is tedious to do by hand)
+
+###
+# set the name of the conda environment
+envname <- "igblast_changeo_env"
+# rest of chunk should run itself
+###
+
+library(reticulate)
+
+if (envname %in% conda_list()$name) {
+  message("Conda environment already exists. Skipping.\nIf a fresh environment desired, delete the current one or specify a new name")
+  conda_env_finalise <- FALSE
+  
+  } else {
+
+    conda_env_finalise <- TRUE
+conda_create(envname = "igblast_changeo_env") # this will over-write any conda environment of same name.
+
+conda_install(envname = "igblast_changeo_env",
+              packages = c("igblast=1.15", "changeo=1.0.1", "igphyml=1.1.3", "phylip=3.697"),
+              channel = "bioconda")
+}
+use_condaenv("igblast_changeo_env", required = TRUE)
+
+
+## It is useful to have the path to this environment as an R variable.
+conda_path <- conda_list()
+
+conda_path <- conda_path[conda_path$name == "igblast_changeo_env", "python"]
+conda_path <- gsub(conda_path, pattern = "/bin/python", replacement = "")
+
+## The next issue is that system() does not 'see' this conda environment
+## system() runs in whichever shell terminal R or Rstudio creates
+## whereas the reticulate::python os module does see the right path.
+
+```
+
+```{python, eval = F}
+
+# This is an option to run python code in rstudio.
+import os
+os.system("which AssignGenes.py")  # AssignGenes.py is in changeo suite.
+exit
+
+```
+
+```{r}
+# Probably easiest to import python's os library as an R object.
+# as a side effect this makes sure the conda environment is working.
+os <- import("os")
+
+bash_cmd <- "which AssignGenes.py"  # AssignGenes.py is in changeo suite.
+
+os$system(bash_cmd)
+```
+
+```{r}
+
+# the conda_env_finalise flag is TRUE if the conda environment is built in the chunk above.
+# this chunk is wrapped in an if{} so it only executes if the conda environment is new.
+
+if(conda_env_finalise == TRUE) {
+
+### There are two more preparatory steps
+## See here: https://changeo.readthedocs.io/en/stable/examples/igblast.html
+
+## These only need to be initiated once in the conda environment.
+## they take < 1min to run, so I haven't yet stopped them running each knit.
+
+## STEP 1 - get additional immcantation scripts ##
+
+# 4 scripts from the Immcantation repository are required for to make igblast database from IGMT.
+# 1 script is useful for clone assignment 'light_cluster.py' - used much later.
+# For convenience, light_cluster.py is downloaded now.
+immcant_scripts <- c("fetch_igblastdb.sh",
+                     "fetch_imgtdb.sh",
+                     "clean_imgtdb.py",
+                     "imgt2igblast.sh",
+                     "light_cluster.py")
+
+# Make bash code to curl them all:
+system(paste0("curl https://bitbucket.org/kleinstein/immcantation/raw/72aa80f6f5aeb9b211801139056e302fc8785c7b/scripts/", 
+       immcant_scripts, 
+       " -o ", conda_path, "/bin/", immcant_scripts,
+       collapse = "\n\n")
+)
+
+# Make these executable:
+system(paste0("chmod 755 ", conda_path, "/bin/", immcant_scripts,
+       collapse = "\n\n"))
+
+#### STEP 2 - make IGMT references #####
+
+# Download reference databases
+system(paste0(conda_path, "/bin/fetch_igblastdb.sh -o ", conda_path, "/share/igblast"))
+system(paste0(conda_path, "/bin/fetch_imgtdb.sh -o ", conda_path, "/share/germlines/imgt"))
+# Build IgBLAST database from IMGT reference sequences
+system(paste0(conda_path, "/bin/imgt2igblast.sh -i ", conda_path, "/share/germlines/imgt ", "-o ", conda_path, "/share/igblast"))
+
+}
+```
+
+```{r}
+### Get sample of interest.
+# For this analysis (SHM mutations), it is the IgD- enriched PBMC at day 28.
+# SRR11233635
+# Cellranger vdj count already executed.
+
+# Soft link the two files to this directory:
+system("ln -s cellranger/Turner_VDJ_SRR11233635/outs/SRR11233635_filtered_contig_annotations.csv filtered_contig_annotations.csv")
+
+system("ln -s cellranger/Turner_VDJ_SRR11233635/outs/filtered_contig.fasta filtered_contig.fasta")
+
+
+```
+
+```{r}
+## The 10x preparatory steps:
+# based on: https://changeo.readthedocs.io/en/1.0.1/examples/10x.html
+
+## This is similar to the immcantation 10x pipeline
+# Find in the docker image of immcantation (not in changeo itself.)
+# https://bitbucket.org/kleinstein/immcantation/raw/72aa80f6f5aeb9b211801139056e302fc8785c7b/pipelines/changeo-10x.sh
+
+# Set up parameters:
+fasta <- "filtered_contig.fasta" # file path to fasta file. cellranger vdj output file is "filtered_contig.fasta"
+annotations <- "filtered_contig_annotations.csv" # file path to anntations
+# Can set both of these to "all_contigs".
+
+# there lots of other tuning parameters available.
+# if you want to add these in, the immuncantation 10x pipeline is probably easier.
+
+
+### DO NOT ADJUST ###
+
+os$system(paste0("AssignGenes.py igblast -s ",fasta,
+                 " -b ",
+                 conda_path, "/share/igblast/ --organism human --loci ig --format blast"))
+
+os$system(paste0("MakeDb.py igblast -i ", gsub(fasta, pattern = ".fasta$", replacement = "_igblast.fmt7"),
+                 " -s ", fasta, 
+                 " -r ", conda_path, "/share/germlines/imgt/human/vdj/",
+                 " --10x ", annotations, " --extended"))
+
+
+### Split to heavy and light chains
+# note that "IGH" requires " ", so the string is marked in R using ' '.
+os$system(paste0('ParseDb.py select -d ',
+                  gsub(fasta, pattern = ".fasta$", replacement = "_igblast_db-pass.tsv"),
+                 ' -f locus -u "IGH" --logic all --regex --outname heavy'))
+
+os$system(paste0('ParseDb.py select -d ',
+                  gsub(fasta, pattern = ".fasta$", replacement = "_igblast_db-pass.tsv"),
+                 ' -f locus -u "IG[LK]" --logic all --regex --outname light'))
+
+## The changeo-10x pipeline script would now split these into {heavy, light} {productive and non-productive}.
+# The changeo 10x parsing advice does not insist on spliting {prod, non-prod}
+# All of the testing "filtered_contigs" contain only productive IgH, so I have not enforced this step.
+
+### Use shazam to set clone threshold ##
+# https://bitbucket.org/kleinstein/immcantation/src/72aa80f6f5aeb9b211801139056e302fc8785c7b/pipelines/shazam-threshold.R?at=master#shazam-threshold.R-2,20,22,34,50:51,69
+# Above is the Rscript used to wrap the following R code.
+
+# Calculate distance-to-nearest
+library(shazam)
+library(alakazam)
+
+db <- readChangeoDb(file = "heavy_parse-select.tsv")
+db <- distToNearest(db, sequenceColumn="junction", vCallColumn="v_call", jCallColumn="j_call",
+                                     model="ham", first=FALSE, normalize="len")
+
+# Calculate threshold
+threshold <- findThreshold(db[["dist_nearest"]], method="density", model="gamma-gamma")
+# Plot the calculated threshold:
+plot(threshold, binwidth=0.02, silent=FALSE) + ggtitle(label = paste(fasta, annotations, sep ="\n"))
+
+
+### Define clones ###
+os$system(paste0('DefineClones.py -d heavy_parse-select.tsv --model ham --dist ', print(threshold),
+        ' --mode gene --act set --outname "heavy" --format airr'))
+
+### Light chain correction ###
+os$system(paste0('light_cluster.py -d heavy_clone-pass.tsv -e light_parse-select.tsv -o 10x_clone_pass.tsv --format airr --doublets count'))
+# Worth noting the --doublets count option - this takes the highest expression IgH if a cell contains >1.
+# I think for filtered_contigs/_annotations cellranger has already done this filter.
+# Alternative options include discarding cells with |IgH|>1.
+
+### the 10x script would end at this point ###
+
+### Create germlines ###
+# This is required to calculate SHM, as the germline provides the reference
+# It also allows us to mask the D segment - standard shazam practice.
+# and it allows use to make a single germline for each clone.
+##
+
+os$system(paste0("CreateGermlines.py -d 10x_clone_pass.tsv -g dmask ",
+                 #"--cloned ",
+                 # ^ this maps each clone back to a 'germline'
+                 # we want to map each cell back to its germline, rather than rely on the clonal groups.
+       "-r ",conda_path, "/share/germlines/imgt/human/vdj/imgt_human_IGHV.fasta ",
+       conda_path, "/share/germlines/imgt/human/vdj/imgt_human_IGHD.fasta ",
+       conda_path, "/share/germlines/imgt/human/vdj/imgt_human_IGHJ.fasta "))
+
+```
+
+```{r}
+# SHM mapping.
+library(shazam)
+library(alakazam)
+db <- readChangeoDb("10x_clone_pass_germ-pass.tsv")
+
+
+# Annotate mutation counts by CDRx and FRx:
+db_obs <- observedMutations(db, sequenceColumn="sequence_alignment",
+                            germlineColumn="germline_alignment_d_mask",
+                            regionDefinition=IMGT_V_BY_REGIONS,
+                            frequency=FALSE)
+
+# Annotate mutation counts by CDR vs FR:
+db_obs <- observedMutations(db_obs, sequenceColumn="sequence_alignment",
+                            germlineColumn="germline_alignment_d_mask",
+                            regionDefinition=IMGT_V_BY_REGIONS,
+                            combine = TRUE,
+                            frequency=FALSE)
+
+
+save(db_obs, file = "Immcantation_db_SRRSRR11233635.RData")
+
+```
+
+```{r}
+## Plot R and S:
+library(tidyverse)
+db_obs %>%
+  mutate("c_call" = factor(c_call)) %>%
+  mutate("cdr1_ratio" = mu_count_cdr1_r / (mu_count_cdr1_s+0.01)) %>%
+  mutate("cdr2_ratio" = mu_count_cdr2_r / (mu_count_cdr2_s+0.01)) %>%
+  mutate("fwr1_ratio" = mu_count_fwr1_r / (mu_count_fwr1_s+0.01)) %>%
+  select(cell_id, c_call, contains("ratio")) %>%
+  pivot_longer(!c(cell_id, c_call), names_to = "region", values_to = "RS") %>%
+  ggpubr::ggboxplot(x = "c_call", y = "RS", facet.by = "region", ylab = "R/S ratio") + ggpubr::rotate_x_text()
+
+```
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

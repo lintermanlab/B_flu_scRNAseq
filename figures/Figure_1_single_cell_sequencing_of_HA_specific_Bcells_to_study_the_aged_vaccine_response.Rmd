@@ -1,0 +1,410 @@
+---
+title: ""
+author: ""
+date: ""
+output: 
+  pdf_document: 
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+```
+
+```{r load_data}
+
+library(MultiAssayExperiment)
+library(ggplot2)
+
+library(magrittr)
+library(dplyr)
+library(ggpubr)
+
+library(pals)
+library(cowplot)
+
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+
+library(ggcyto)
+library(rstatix)
+
+load(file = "../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+load(file = "../cohort_2016_17/Example_of_sc_sort_gating_from_665X_d42.RData")
+
+
+```
+
+
+```{r study_design_panel}
+
+left.cols <- stepped3(20)[c(9,12)]
+right.cols <- stepped3(20)[c(15)]
+
+study <- ggplot() + xlim(0,10) + ylim(-0.5, 10.5) + theme_pubr(base_size = 12) + 
+  
+  # Left-hand labels + backgrounds:
+  
+  annotate(geom= "rect",xmin = 0, ymax = 10.3, xmax = 3, ymin = 6.8, fill = left.cols[1]) + 
+  annotate(geom= "text", x = 1.5, y = 8.55, label = "Healthy\nvolunteers") +
+  
+  annotate(geom= "rect",xmin = 0, ymax = 6.6, xmax = 3, ymin = -0.2, fill = left.cols[2]) + 
+  annotate(geom= "text",x = 1.5, y = 5, label = 
+             paste0(
+  names(summary(ALFNA16$Age.Group)[1]),
+  "\nyears\nn=",
+  summary(ALFNA16$Age.Group)[[1]]
+  )) +
+  
+  annotate(geom= "text",x = 1.5, y = 1.5, label = 
+             paste0(
+  names(summary(ALFNA16$Age.Group)[2]),
+  "\nyears\nn=",
+  summary(ALFNA16$Age.Group)[[2]]
+  )) +
+  
+  # Right-hand labels + backgrounds:
+  annotate(geom= "rect",xmin = 6, ymax = 10.3, xmax = 10, ymin = 5.2,fill = right.cols[1]) + 
+  annotate(geom= "text",x = 8, y = 7.75, label = "HA inhibition\nassay") +
+  annotate(geom= "rect",xmin = 6, ymax = 5, xmax = 10, ymin = -0.2,fill = right.cols[1]) + 
+  annotate(geom= "text",x = 8, y = 2.6, label = "Index sorting\nHA-specific\nB cells\nday 0 & 42") +
+  
+  # Mid-section background:
+  annotate(geom= "rect",xmin = 3.2, ymax = 10.3, xmax = 5.8, ymin = -0.2, fill = stepped3(20)[20]) + 
+  
+  # time line
+    annotate(geom= "segment", x = 3.4, y = 6,xend = 5.5,yend = 6,size = 1.5, arrow = arrow(type = "closed",
+                                                                                 length = unit(6, "points"))) + 
+  #line + arrow for day 0 bleed
+    annotate(geom= "segment",x = 3.5,yend = 0.5,xend = 3.5, y= 6, size = 1) +
+    annotate(geom= "segment",x = 3.5-.055,yend = 0.5,xend = 5.5, y= 0.5, size = 1, arrow = arrow(length = unit(6, "points"))) +
+  annotate(geom= "text",x = 3.5, y = 7, label = "0", hjust = "center") +
+  
+  # line + arrow for day 7 bleed
+    annotate(geom= "segment",x = 3.75,yend = 1.5,xend = 3.75, y= 6, size = 1) +
+    annotate(geom= "segment",x = 3.75-.055,yend = 1.5,xend = 5.5, y= 1.5, size = 1, arrow = arrow(length = unit(6, "points"))) +
+  annotate(geom= "text",x = 4, y = 7, label = "7") +
+  
+  # line + arrow for day 42 bleed
+    annotate(geom= "segment",x = 5,yend = 5,xend = 5, y= 6, size = 1) +
+    annotate(geom= "segment",x = 5-.055,yend = 5,xend = 5.5, y= 5, size = 1, arrow = arrow(length = unit(6, "points"))) +
+  annotate(geom= "text",x = 5, y = 7, label = "42", hjust = "left") +
+  
+  # Syringe
+    annotate(geom= "segment",x=3.5,yend=10, xend= 3.5, y=8, size = 1) + 
+    annotate(geom= "segment",x=3.5 - 0.2 ,yend=10, xend= 3.5 +0.2, y=10, size = 1) + 
+  annotate(geom= "rect",xmin = 3.5 - 0.2, ymax = 10- 0.4, xmax = 3.5 + 0.2, ymin = 10 - (0.2 * 7), fill = "white", col = "black") + 
+  
+  # TIV
+  annotate(geom= "text",x = 4.25, y = 8.5, label = "TIV") +
+  
+  # hide all axes, their titles, ticks and labels:
+  theme(axis.line = element_blank(), axis.title = element_blank(), axis.ticks = element_blank(), axis.text = element_blank())
+
+
+```
+
+```{r hai}
+hai.data <- wideFormat(ALFNA16[ , , 
+                                # select assays with names that match:
+                                # 'HAI'
+                                # which returns all data from these two assays at all available days.
+                                grepl(names(assays(ALFNA16)), pattern = "HAI") ],
+                      # Return ages as well:
+                       colDataCols = "Age.Group")
+
+
+hai.data <- as.data.frame(hai.data)
+```
+
+
+```{r run_SingleR}
+
+library(SingleR)
+mon.se <- MonacoImmuneData()
+
+counts <- logNormCounts(sce)
+
+
+# Change rownames from ENSG ID to symbols:
+library(org.Hs.eg.db)
+rownames(counts) <- mapIds(
+  org.Hs.eg.db,
+  keys=rownames(counts),
+  keytype="ENSEMBL", column="SYMBOL", multiVals = "first")
+
+# Remove any NA gene symbols:
+counts <- counts[ !isNA(rownames(counts)), ]
+
+# Predict - note we are using the 'fine' labels:
+pred <- SingleR(test = counts, ref = list(MON=mon.se), 
+                labels = list(MON=mon.se$label.fine))
+
+pred$shortlabels <- pred$labels
+pred$shortlabels %<>% gsub(., pattern = "Exhausted B cells", replacement = "IgD-CD27- Bmem")
+pred$shortlabels %<>% gsub(., pattern = "Naive B cells", replacement = "Naive")
+pred$shortlabels %<>% gsub(., pattern = "Non-switched memory B cells", replacement = "Non-switched Bmem")
+pred$shortlabels %<>% gsub(., pattern = "Switched memory B cells", replacement = "Switched Bmem")
+pred$shortlabels %<>% gsub(., pattern = "Plasmablasts", replacement = "Plasmablast")
+pred$shortlabels %<>% gsub(., pattern = "Plasmacytoid dendritic cells", replacement = "pDC")
+
+pred$shortlabels <- factor(pred$shortlabels,
+                           levels = c("Naive",
+                                      "Non-switched Bmem",
+                                      "Switched Bmem",
+                                      "IgD-CD27- Bmem",
+                                      "Plasmablast",
+                                      "pDC")) # a levels argument forces order for plots.
+
+
+sce$labels <- pred$shortlabels
+
+
+```
+
+```{r}
+## flow % HA panel.
+
+library(tidyverse)
+library(ggpubr) # for themes for plots.
+
+
+load(file = "../cohort_2016_17/Concatenated_index_master_fcs_gated_in_FlowJo_2_table_output.RData")
+
+merged.data <- as_tibble(merged.data)
+merged.data$y1 <- merged.data$`Lymphocytes/Single Cells/Single Cells/DUMP-/CD19+SA-/hA_APC+hA_PE+ | Freq. of Parent (%)`
+
+y1 <- "y1"
+ylab1 <- "\nHA+ B cells \n[% of live B cells]"
+
+data.for.ggpaired1 <- reshape2::dcast(
+  merged.data, PID+age ~ day, value.var = y1)
+
+data.for.ggpaired1$expansion <- data.for.ggpaired1$d42/data.for.ggpaired1$d0
+
+# data.for.ggpaired1 %>%
+#   group_by(age) %>%
+#   dplyr::summarise(median = median(expansion))
+
+```
+
+
+```{r plot_figure}
+
+symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1),
+                    symbols = c("****", "***", "**", "*", "ns")) # for the P values 
+
+
+
+hai.p.values <- hai.data %>%
+  dplyr::select(primary, Age.Group, 
+                -contains("HAI_d"), contains("log2")) %>%
+  mutate("Age" = factor(paste0(Age.Group, "\nyo"))) %>%
+  dplyr::select(-Age.Group) %>%
+  set_colnames(
+    gsub(colnames(.), 
+         pattern = "HAI_d|_log2.titre", replacement = "")) %>%
+  reshape2::melt( id_vars = c(primary, Age)) %>%
+  set_colnames(gsub(colnames(.), pattern = "variable", replacement = "day")) %>%
+  set_colnames(gsub(colnames(.), pattern = "value", replacement = "titre")) %>%
+  arrange(., Age, primary) %>%
+  group_by(Age) %>%
+  wilcox_test(titre ~ day, paired = T)
+
+hai.p.values <- hai.p.values %>% 
+  add_xy_position(x = "day") %>% 
+  add_significance(p.col = "p", 
+                   cutpoints = symnum.args$cutpoints,
+                   symbols = symnum.args$symbols)
+
+
+
+
+
+plot_grid(
+  # ROW 1:
+  plot_grid(
+    # study design
+    study,
+    
+    # HAI titres, faceted by age.
+    ggstripchart(data = 
+                 hai.data %>%
+                 dplyr::select(primary, Age.Group, 
+                               contains("HAI_d"), -contains("log2")) %>%
+                 mutate("Age" = factor(paste0(Age.Group, "\nyo"))) %>%
+                 dplyr::select(-Age.Group) %>%
+                 set_colnames(
+                   gsub(colnames(.), 
+                        pattern = "HAI_d|_titre", replacement = "")) %>%
+                 reshape2::melt( id_vars = c(primary, Age)),
+               x = "variable", y="value",
+               xlab = "day",
+               shape = 21, fill = "Age", palette = c("white", "darkgrey"),
+               facet.by = "Age", ncol = 2,
+               add = "violin",
+               add.params = list(color = "grey", fill = NA),
+               legend = "none",
+               ylab = "A/Cal09 HAI titer")  +
+ stat_pvalue_manual(hai.p.values, label = "p.signif", step.increase = c(0.1)) +
+            scale_y_continuous(trans = "log2", limits = c(1, 10000)) +
+      theme_pubr(legend = "none") +
+      theme(strip.background = element_rect(fill = "NA")),
+    
+    # gtable of a ggcyto plot
+    fig,
+    
+    labels = LETTERS[1:3],
+    rel_widths = c(3,2,2),
+    ncol = 3),
+  
+  # ROW 2:
+  plot_grid(
+    ## This is the HA % of live B cells.
+    ##
+    ggpaired(data.for.ggpaired1, cond1 = "d0", cond2 = "d42", facet.by = "age",
+           ylab = ylab1, line.color = "grey",
+           xlab = "day") +
+    stat_compare_means(method = "wilcox",
+                       label.y = 0.35,
+                       paired = TRUE,
+                       comparisons = list(c(1,2))) +
+      theme_pubr() +
+    theme(strip.background = element_rect(fill = NA)),
+    
+    
+  # UMAP both day 0 and day 42
+  # Louvain clustering
+  plotUMAP(sce, colour_by="clusters") + 
+    theme_pubr(legend = "right") + 
+    guides(fill = guide_legend(title = "Louvain\ncluster",
+                               title.position = "top")) + 
+    theme(legend.key.size = unit(0, 'lines'),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1) + rotate_x_text(),
+  
+  
+  labels = LETTERS[4:5],
+  rel_widths = c(1,2),
+  ncol = 2),
+  
+  # ROW 3:
+  plot_grid(
+    # LEFT HAND PANEL:
+  # UMAP both day 0 and day 42
+  # Colours from SingleR labels.
+  plotUMAP(sce[ , sce$labels != "pDC"], colour_by="labels") +
+    scale_fill_brewer(palette = "Spectral") +
+    theme_pubr() +
+    labs(fill =  "cell\nassignment") +
+    theme(legend.position = "bottom", legend.direction = "vertical",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.size = unit(0, 'lines'),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+    
+    # RIGHT HAND 4 UMAPs:
+    plot_grid(
+  # UMAP both day 0 and day 42
+  # Colours from index flow IgD
+  plotUMAP(sce, colour_by="IgD.BUV737") +
+    viridis::scale_fill_viridis(option="inferno") + 
+    labs(fill = "Surface\nIgD") +
+    theme_pubr() + 
+    theme(legend.position = "right",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+  
+   # UMAP both day 0 and day 42
+  # Colours from index flow CD27 
+    plotUMAP(sce, colour_by="CD27.BV711") + 
+    viridis::scale_fill_viridis(option="inferno") +
+     labs(fill = "Surface\nCD27") +
+     theme_pubr() +
+     theme(legend.position = "right",
+           axis.ticks = element_blank(),
+           axis.text = element_blank(),
+           legend.key.width = unit(6,"points"),
+           legend.key.height = unit(12,"points"),
+           legend.margin = margin(0,0,0,0, 'lines'),
+           aspect.ratio = 1),
+  
+  # UMAP both day 0 and day 42
+  # Colours from index flow CD21
+  plotUMAP(sce, colour_by="CD21.PE.cy7") +
+    viridis::scale_fill_viridis(option="inferno") +
+    labs(fill = "Surface\nCD21") +
+    theme_pubr() +
+    theme(legend.position = "right",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+  
+  # UMAP both day 0 and day 42
+  # Colours from index flow CD28
+  plotUMAP(sce, colour_by="CD38.BV421") + 
+    viridis::scale_fill_viridis(option="inferno") +
+    labs(fill = "Surface\nCD38") +
+    theme_pubr() +
+    theme(legend.position = "right",
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          legend.key.width = unit(6,"points"),
+          legend.key.height = unit(12,"points"),
+          legend.margin = margin(0,0,0,0, 'lines'),
+          aspect.ratio = 1),
+  
+  labels = LETTERS[7:10],
+  ncol = 2),
+  
+  labels = c(LETTERS[6], NULL),
+  rel_widths = c(1,2),
+  ncol = 2),
+  
+  ncol = 1)
+
+
+```
+
+__Figure 1 – Single cell sequencing of haemagluttinin specific B cells to study the aged vaccine response__
+
+(A) Study design. Venepuncture performed on days 0 (just prior to immunization), 7 and 42. Peripheral blood mononuclear cells were isolated on the day of venepuncture and cryopreserved for later index sorting experiments.
+(B) Haemagglutinin inhibition (HAI) assay titers from days 0, 7 and 42 are shown for `r levels(ALFNA16$Age.Group)[1]` year old or `r levels(ALFNA16$Age.Group)[2]` year old volunteers as open or greyed circles respectively (n=10 in both groups).
+(C) Recombinant biotinylated haemagglutinin conjugated with streptavidin-PE or -APC allows the identification of haemagglutinin specific B cells. Gated on live, singlet CD19+ lymphocytes. Full gating strategy is shown in Supplementary Figure 1A.
+(D) The proportion of haemagglutinin binding B cells increases after vaccination, for both 22-36 year olds and 67-86 year olds. Proportion expressed as percentage of live B cells, that do not bind free streptavidin.
+(E) UMAP embedding of single cell RNA sequencing from A/Cal09-specific B cells, n=`r ncol(sce)` cells. UMAP projection based on the first 40 principal components using the features with the top 10% variance, after removal of low quality cells (Supplementary Figure 1) and size normalization by deconvolution. Louvain clustering reveals 5 clusters.
+(F) Cell identity assignment based on published transcriptional profiles of 29 human immune subsets including the following B cell subsets: IgD+CD27- ‘naive’, IgD+CD27+ ‘non-switched Bmem’, IgD-CD27+ ‘switched Bmem’, IgD-CD27- ‘IgD-CD27-’, IgD-CD27+CD38+ plasmablasts ‘PB’ and plasmacytoid DCs. The following numbers of cells were identified: naive `r summary(sce$labels=="Naive")[["TRUE"]]` cells; non-switched Bmem `r summary(sce$labels=="Non-switched Bmem")[["TRUE"]]` cells; Switched Bmem `r summary(sce$labels=="Switched Bmem")[["TRUE"]]` cells; IgD-CD27- Bmem `r summary(sce$labels=="IgD-CD27- Bmem")[["TRUE"]]` cells; Plasmablast
+`r summary(sce$labels=="Plasmablast")[["TRUE"]]` cells and plasmacytoid DC `r summary(sce$labels=="pDC")[["TRUE"]]` cell. No cells were defined as T cells or members of other lymphoid or myeloid lineages.
+(G-J) UMAP embedding as in (E), showing the logicle transformed index sort surface expression of IgD (G), CD27 (H), CD21 (I) and CD38 (J) proteins.
+In (B), _P_ values from paired Mann-Whitney tests (on log2 transformed data) are summarised: *P*>0.05 ns; 0.05>*P*>0.01 \*; 0.01>*P*<0.001 \*\*. In (D), samples from the same individual are indicated with a grey line and _P_ values shown are from a paired two-tailed Mann-Whitney test. In (G)-(J), the scales reflect the decimal log of the logicle transformed fluorescence intensity value.
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

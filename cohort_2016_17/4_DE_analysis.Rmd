@@ -1,0 +1,369 @@
+---
+title: "DE analysis for the 2016-17 cohort"
+author: "EJC"
+date: "Nov 2020, based on code from June 2020 + May 2019"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+The Babraham compute cluster does not contain a global tex installation, so a local tex is added to $PATH to allow knitting to pdf.
+
+```{r}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r}
+
+library(dplyr)
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(org.Hs.eg.db)
+
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+```
+
+```{r}
+########
+# Get day 42 cells
+# Aggregate by PID + UMAP clusters
+# Use edgeR to calculate differentially expressed genes within each UMAP cluster for young vs old.
+##########
+
+
+summed <- sce[,sce$day == "d42"] %>%
+  aggregateAcrossCells(.,
+                       id=DataFrame(
+                                 cluster=.$clusters,
+                                 age=.$age, samples = .$PID))
+
+summed
+
+#
+# This combines several colData columns.
+# This may be useful for index sort data (eg average cell width or for MFIs)
+# But I have not explored exactly what data manipulation is taking place.
+# Therefore treat the colData with extreme caution.
+#
+
+library(edgeR)
+### Loop for all clusters / labels
+
+de.results.d42.YvsO <- list()
+
+for (i in levels(factor(summed$clusters))) {
+  current <- summed[,i==summed$clusters]
+  y <- DGEList(counts(current), samples=colData(current))
+  
+  discarded <- isOutlier(colSums(counts(current)), log=TRUE, type="lower")
+  y <- y[,!discarded]
+  y <- y[filterByExpr(y, min.count = 1, min.total.count =10, min.prop = 0.1),] 
+  y <- calcNormFactors(y)
+  
+  design <- try(
+    model.matrix(~  factor(age), y$samples),
+    silent=TRUE
+  )
+  if (is(design, "try-error") || 
+      qr(design)$rank==nrow(design) ||
+      qr(design)$rank < ncol(design)) 
+  {
+    # Skipping labels without contrasts or without 
+    # enough residual d.f. to estimate the dispersion.
+    next
+  }
+  
+  y <- estimateDisp(y, design)
+  fit <- glmQLFit(y, design)
+  res <- glmQLFTest(fit, coef=ncol(design))
+  de.results.d42.YvsO[[i]] <- res
+}
+
+#
+summaries.d42.YvsO <- lapply(de.results.d42.YvsO, FUN=function(x) summary(decideTests(x, adjust.method = "fdr", p.value = 0.05))[,1])
+
+
+sum.tab.d42.YvsO <- do.call(rbind, summaries.d42.YvsO)
+sum.tab.d42.YvsO
+
+########
+# Get day 0 cells
+# Aggregate by PID + UMAP clusters
+# Use edgeR to calculate differentially expressed genes within each UMAP cluster for young vs old.
+##########
+
+
+summed <- sce[,sce$day == "d0"] %>%
+  aggregateAcrossCells(.,
+                       id=DataFrame(
+                         cluster=.$clusters,
+                         age=.$age, samples = .$PID))
+
+summed
+
+#
+# This combines several colData columns.
+# This may be useful for index sort data (eg average cell width or for MFIs)
+# But I have not explored exactly what data manipulation is taking place.
+# Therefore treat the colData with extreme caution.
+#
+
+library(edgeR)
+### Loop for all clusters / labels
+
+de.results.d0.YvsO <- list()
+
+for (i in levels(factor(summed$clusters))) {
+  current <- summed[,i==summed$clusters]
+  y <- DGEList(counts(current), samples=colData(current))
+  
+  discarded <- isOutlier(colSums(counts(current)), log=TRUE, type="lower")
+  y <- y[,!discarded]
+  y <- y[filterByExpr(y, min.count = 1, min.total.count =10, min.prop = 0.1),] 
+  y <- calcNormFactors(y)
+  
+  design <- try(
+    model.matrix(~  factor(age), y$samples),
+    silent=TRUE
+  )
+  if (is(design, "try-error") || 
+      qr(design)$rank==nrow(design) ||
+      qr(design)$rank < ncol(design)) 
+  {
+    # Skipping labels without contrasts or without 
+    # enough residual d.f. to estimate the dispersion.
+    next
+  }
+  
+  y <- estimateDisp(y, design)
+  fit <- glmQLFit(y, design)
+  res <- glmQLFTest(fit, coef=ncol(design))
+  de.results.d0.YvsO[[i]] <- res
+}
+
+#
+summaries.d0.YvsO <- lapply(de.results.d0.YvsO, FUN=function(x) summary(decideTests(x, adjust.method = "fdr", p.value = 0.05))[,1])
+
+
+sum.tab.d0.YvsO <- do.call(rbind, summaries.d0.YvsO)
+sum.tab.d0.YvsO
+
+
+
+########
+# Get young cells
+# Aggregate by PID + UMAP clusters
+# Use edgeR to calculate differentially expressed genes within each UMAP cluster for young d0 vs young d42.
+##########
+
+
+summed <- sce[,sce$age == "young"] %>%
+  aggregateAcrossCells(.,
+                       id=DataFrame(
+                         cluster=.$clusters,
+                         day=.$day, samples = .$PID))
+
+summed
+
+#
+# This combines several colData columns.
+# This may be useful for index sort data (eg average cell width or for MFIs)
+# But I have not explored exactly what data manipulation is taking place.
+# Therefore treat the colData with extreme caution.
+#
+
+library(edgeR)
+### Loop for all clusters / labels
+
+de.results.Y.d0vsd42 <- list()
+
+for (i in levels(factor(summed$clusters))) {
+  current <- summed[,i==summed$clusters]
+  y <- DGEList(counts(current), samples=colData(current))
+  
+  discarded <- isOutlier(colSums(counts(current)), log=TRUE, type="lower")
+  y <- y[,!discarded]
+  y <- y[filterByExpr(y, min.count = 1, min.total.count =10, min.prop = 0.1),] 
+  y <- calcNormFactors(y)
+  
+  design <- try(
+    model.matrix(~  factor(day), y$samples),
+    silent=TRUE
+  )
+  if (is(design, "try-error") || 
+      qr(design)$rank==nrow(design) ||
+      qr(design)$rank < ncol(design)) 
+  {
+    # Skipping labels without contrasts or without 
+    # enough residual d.f. to estimate the dispersion.
+    next
+  }
+  
+  y <- estimateDisp(y, design)
+  fit <- glmQLFit(y, design)
+  res <- glmQLFTest(fit, coef=ncol(design))
+  de.results.Y.d0vsd42[[i]] <- res
+}
+
+#
+summaries.Y.d0vsd42 <- lapply(de.results.Y.d0vsd42, FUN=function(x) summary(decideTests(x, adjust.method = "fdr", p.value = 0.05 ))[,1])
+
+
+sum.tab.Y.d0vsd42 <- do.call(rbind, summaries.Y.d0vsd42)
+
+
+########
+# Get old cells
+# Aggregate by PID + UMAP clusters
+# Use edgeR to calculate differentially expressed genes within each UMAP cluster for old d0 vs old d42.
+##########
+
+
+summed <- sce[,sce$age == "old"] %>%
+  aggregateAcrossCells(.,
+                       id=DataFrame(
+                         cluster=.$clusters,
+                         day=.$day, samples = .$PID))
+
+summed
+
+#
+# This combines several colData columns.
+# This may be useful for index sort data (eg average cell width or for MFIs)
+# But I have not explored exactly what data manipulation is taking place.
+# Therefore treat the colData with extreme caution.
+#
+
+library(edgeR)
+### Loop for all clusters / labels
+
+de.results.O.d0vsd42 <- list()
+
+for (i in levels(factor(summed$clusters))) {
+  current <- summed[,i==summed$clusters]
+  y <- DGEList(counts(current), samples=colData(current))
+  
+  discarded <- isOutlier(colSums(counts(current)), log=TRUE, type="lower")
+  y <- y[,!discarded]
+  y <- y[filterByExpr(y, min.count = 1, min.total.count =10, min.prop = 0.1),] 
+  y <- calcNormFactors(y)
+  
+  design <- try(
+    model.matrix(~  factor(day), y$samples),
+    silent=TRUE
+  )
+  if (is(design, "try-error") || 
+      qr(design)$rank==nrow(design) ||
+      qr(design)$rank < ncol(design)) 
+  {
+    # Skipping labels without contrasts or without 
+    # enough residual d.f. to estimate the dispersion.
+    next
+  }
+  
+  y <- estimateDisp(y, design)
+  fit <- glmQLFit(y, design)
+  res <- glmQLFTest(fit, coef=ncol(design))
+  de.results.O.d0vsd42[[i]] <- res
+}
+
+#
+summaries.O.d0vsd42 <- lapply(de.results.O.d0vsd42, FUN=function(x) summary(decideTests(x, adjust.method = "fdr", p.value = 0.05 ))[,1])
+
+
+sum.tab.O.d0vsd42 <- do.call(rbind, summaries.O.d0vsd42)
+
+
+########
+# Get all cells
+# Aggregate by PID, day + UMAP clusters
+# Use edgeR to calculate differentially expressed genes within each UMAP cluster for day0 and day 42 (ie ignore age here).
+##########
+
+
+summed <- sce %>%
+  aggregateAcrossCells(.,
+                       id=DataFrame(
+                                 cluster=.$clusters,
+                                 day=.$day, samples = .$PID))
+
+summed
+
+#
+# This combines several colData columns.
+# This may be useful for index sort data (eg average cell width or for MFIs)
+# But I have not explored exactly what data manipulation is taking place.
+# Therefore treat the colData with extreme caution.
+#
+
+library(edgeR)
+### Loop for all clusters / labels
+
+de.results.d42vsd0 <- list()
+
+for (i in levels(factor(summed$clusters))) {
+  current <- summed[,i==summed$clusters]
+  y <- DGEList(counts(current), samples=colData(current))
+  
+  discarded <- isOutlier(colSums(counts(current)), log=TRUE, type="lower")
+  y <- y[,!discarded]
+  y <- y[filterByExpr(y, min.count = 1, min.total.count =10, min.prop = 0.1),] 
+  y <- calcNormFactors(y)
+  
+  design <- try(
+    model.matrix(~  factor(day), y$samples),
+    silent=TRUE
+  )
+  if (is(design, "try-error") || 
+      qr(design)$rank==nrow(design) ||
+      qr(design)$rank < ncol(design)) 
+  {
+    # Skipping labels without contrasts or without 
+    # enough residual d.f. to estimate the dispersion.
+    next
+  }
+  
+  y <- estimateDisp(y, design)
+  fit <- glmQLFit(y, design)
+  res <- glmQLFTest(fit, coef=ncol(design))
+  de.results.d42vsd0[[i]] <- res
+}
+
+#
+summaries.d42vsd0 <- lapply(de.results.d42vsd0, FUN=function(x) summary(decideTests(x, adjust.method = "fdr", p.value = 0.05))[,1])
+
+
+sum.tab.d42vsd0 <- do.call(rbind, summaries.d42vsd0)
+sum.tab.d42vsd0
+
+
+
+### Overall:
+sum.tab.d42vsd0
+sum.tab.Y.d0vsd42
+sum.tab.O.d0vsd42
+sum.tab.d0.YvsO
+sum.tab.d42.YvsO
+
+
+```
+
+
+```{r gene_symbols}
+library(org.Hs.eg.db)
+lapply(de.results.d42vsd0, function(z) topTags(z,n = 100, p.value = 0.05)) %>% 
+  lapply(., function(x) {
+    if(nrow(x) >0){ 
+      mapIds(org.Hs.eg.db, keys=rownames(x),
+       keytype="ENSEMBL", column="SYMBOL", multiVals = "first")}
+})
+
+```
+
+

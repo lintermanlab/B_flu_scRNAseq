@@ -1,0 +1,545 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7.5, fig.height = 7, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r load_data, warning=FALSE, message=FALSE, results='hide'}
+
+## Pseudo-code.
+
+# count the number of IhG chains reported per chain.
+# plot this by sce$clusters
+# Assume naives have mean =2 , other clusters mean = 1.
+
+# Check the naive cells with 2 IgH chains: are V, D, J calls identical + sequences identical between chains.
+# Is the expression of IgM>IgD.
+# 
+# Can I update my import function, to label these special cases as IgM/D.
+#
+#
+
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(SingleCellExperiment)
+library(scater)
+```
+
+
+```{r}
+
+
+VDJPuzzleimporter.all.IgH <- function(path = "~/nf_bcr_output/VDJPuzzle/", pattern = "*.tsv$"){
+  require(readr)
+  require(dplyr)
+  
+  # Get filenames
+  vdj.out <- list.files(path = path, pattern = pattern, recursive = T, full.names = T)
+  
+  ## Remove any NoIndex files:
+  vdj.out <- vdj.out[ ! grepl(vdj.out, pattern = "NoCode|NoIndex")]
+  
+  ## Select only those with /final_receptor_results
+  vdj.out.to.read <- vdj.out[ ! grepl(vdj.out, pattern = "final_receptor_results")]
+  
+  cat("\nFound ",
+  length(vdj.out.to.read [ grepl(vdj.out.to.read, pattern = "IGH")]),
+  " heavy chain files to import\n")
+  
+  cat("\nFound ",
+      length(vdj.out.to.read [ grepl(vdj.out.to.read, pattern = "IGL|IGK")]),
+      " light chain files to ignore\n")
+  
+  ## Work out the number of lines of each file:
+  vdj.heavy.lines <- lapply(vdj.out.to.read [ grepl(vdj.out.to.read, pattern = "IGH")], function(X) { length(readLines(X))})
+  vdj.heavy.lines <- unlist(vdj.heavy.lines)
+  vdj.heavy.lines <- factor(vdj.heavy.lines)
+  cat("\n There are ",
+      summary(vdj.heavy.lines == 1)[[3]],
+      "heavy chain files that are empty\n")
+
+ ## Read in each file:
+  vdj.heavy.results <- lapply(vdj.out.to.read[ grepl(vdj.out.to.read, pattern = "IGH")], function(x) {
+    suppressWarnings(
+    read_tsv(file = x,col_types = cols(.default = "c"))
+    )
+  })
+  
+    ## Parse the list of tbls into useful objects
+  vdj.heavy.results <- vdj.heavy.results %>%
+    # Bind rows
+    bind_rows() %>%
+    # Sort out a 'label' column, where _L001 is taken off the end, and IGx_ off the start of CellID
+    mutate(label = gsub(x = gsub(CellID,pattern = "_L001*$", replacement = ""), pattern = "^IGH_", replacement = ""))
+
+  return(vdj.heavy.results)
+}
+
+```
+
+```{r warning=FALSE, message=FALSE, results='hide'}
+all.igh <- VDJPuzzleimporter.all.IgH()
+
+all.igh <- all.igh %>% 
+  dplyr::add_count(CellID, name = "n_of_igh_per_cell") %>%
+  dplyr::add_count(CellID, v_sequence_alignment, d_sequence_alignment, j_sequence_alignment, v_call, j_call, d_call, cdr3, name = "clone_counts") %>%
+  dplyr::add_count(CellID, v_sequence_alignment, d_sequence_alignment, j_sequence_alignment, v_call, j_call, d_call, cdr3, `Isotype/Constant`, name = "clone_isotype_counts")
+
+```
+
+__Supporting analysis: IgH chain assignment after VDJPuzzle execution__
+
+There are 960 wells (8 NTCs, 952 cells). Of which, `r nlevels(factor(all.igh$CellID))` give at least one IgH chain.
+
+
+There `r nrow(all.igh)` reported IgH chains, across these `r nlevels(factor(all.igh$CellID))` cells. The median number of chains reported per cell is `r median(all.igh$n_of_igh_per_cell)`.
+
+
+Many of these individually reported IgH chains are very similar at the nucleotide sequence level, as shown in the plots below. The first panel is a histogram of number IgH chains reported per cell. In the second panel, IgH chains are called a clone if they have identical nucleotide sequence for V, D, J segments and across CDR3, with the same allele calls for V, D and J segments (median `r median(all.igh$clone_counts)`). In the third panel, clones are defined more stringently, with the prior definition and the addition of the same isotype call (median `r median(all.igh$clone_isotype_counts)`).
+
+```{r}
+
+cowplot::plot_grid(
+  gghistogram(all.igh$n_of_igh_per_cell, xlab = "# per cell", 
+          title = "IgH chains per cell",
+          add_density = T,
+          bins = max(all.igh$n_of_igh_per_cell),
+          add.params = list(color = "dodgerblue")),
+
+  gghistogram(all.igh$clone_counts, xlab = "# per cell", 
+          title = "Ig clones per cell",
+          bins = max(all.igh$n_of_igh_per_cell),
+          add_density = T, 
+          add.params = list(color = "dodgerblue")) + 
+            labs(
+              subtitle = 
+                "Clone defined WITHIN each cell as identical:\nnucleotide seq {V, D, J, CDR3} & {V, D and J} calls" ),
+  
+  gghistogram(all.igh$clone_isotype_counts, xlab = "# per cell", 
+          title = "Ig isotype clones per cell",
+          bins = max(all.igh$n_of_igh_per_cell),
+          add_density = T, 
+          add.params = list(color = "dodgerblue")) + 
+            labs(
+              subtitle = 
+                "As before, with identical Isotype/Constant calls" ),
+  
+  ncol = 1
+
+)
+
+```
+
+Together these data suggest that many differences between assemblies of the IgH chain are outside of V, D, J or constant region. These different assemblies may reflect small additions/substractions as Trinity makes _de novo_ contigs, or may reflect sequencing errors. At the biological meaningful parts of antibody these IgH chains look identical, so it is reasonable to collapse these assemblies together, or adopt one of them for the analyses in Figures 3 and 4.
+
+```{r}
+
+expressed.igh <- all.igh %>%
+ group_by(CellID) %>%
+     # Take the highest expressed IgH (by kallisto):
+     top_n(1, Expression)
+
+expressed.igh <- expressed.igh %>%
+  dplyr::add_count(CellID, name = "n_of_expressed_igh_per_cell") %>%
+  dplyr::add_count(CellID, v_sequence_alignment, d_sequence_alignment, j_sequence_alignment, v_call, j_call, d_call, cdr3, name = "expressed_clone_counts") %>%
+  dplyr::add_count(CellID, v_sequence_alignment, d_sequence_alignment, j_sequence_alignment, v_call, j_call, d_call, cdr3, `Isotype/Constant`, name = "expressed_clone_isotype_counts")
+
+```
+
+## Existing approach
+
+In Figures 3 and 4, a simple filtering strategy was applied. The most highly expressed IgH chain was used (and other IgH chains discarded): this reduced the dataset from `r nrow(all.igh)` IgH chains (across `r nlevels(factor(all.igh$CellID))` cells) to `r nrow(expressed.igh)` IgH chains (across `r nlevels(factor(expressed.igh$CellID))` cells). Quantitation was performed by kallisto as part of VDJPuzzle. There are `r expressed.igh %>% filter(Expression == 0) %>% dplyr::count(CellID) %>% nrow` cells where the IgH chains expression is estimated as 0 by kallisto. Of these `r expressed.igh %>% filter(Expression == 0) %>% dplyr::count(CellID) %>% filter(n == 1) %>% nrow` cells have only 1 IgH reported, and there are `r expressed.igh %>% filter(Expression == 0) %>% dplyr::count(CellID) %>% filter(n > 1) %>% nrow` cells have >1 IgH reported. For these `r expressed.igh %>% filter(Expression == 0) %>% dplyr::count(CellID) %>% filter(n > 1) %>% nrow` cells, the first IgH is taken (arbitrarily).
+
+A consequence of this is that naive cells are called as IgM+ BCRs in Figure 3, but are shown to be surface IgD+ in Figure 1. It is known that naive cells co-express IgM and IgD, so this supporting analysis confirms this.
+
+## Transcriptomic data - naive cells express both IgD and IgM
+
+```{r}
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+# helpful to have this factor for plotting:
+sce$named_clusters <- factor(
+  c("*FCRL5*+ B mem",
+    "*MALAT1*+ B mem",
+    "*LY9*+ B mem",
+    "naive",
+    "*MARCKS*+ B mem")[sce$clusters],
+    levels = 
+      c("*FCRL5*+ B mem",
+    "*MALAT1*+ B mem",
+    "*LY9*+ B mem",
+    "naive",
+    "*MARCKS*+ B mem"))
+
+plot_grid(
+    # ENSG00000211898 = IGHD
+   plotUMAP(sce, colour_by="ENSG00000211898") +
+        scale_fill_viridis_c(name = "IGHD RNA") + 
+    theme_pubr() +
+    theme(legend.position = "bottom", 
+          axis.ticks = element_blank(), 
+          axis.text = element_blank(), 
+          aspect.ratio = 1),
+   # ENSG00000211899 = IGHM
+   plotUMAP(sce, colour_by="ENSG00000211899") +
+        scale_fill_viridis_c(name = "IGHM RNA") + 
+    theme_pubr() +
+    theme(legend.position = "bottom", 
+          axis.ticks = element_blank(), 
+          axis.text = element_blank(),
+          aspect.ratio = 1),
+   
+  qplot(y = logcounts(sce)["ENSG00000211899",], x =logcounts(sce)["ENSG00000211898",],
+      xlab = "IgD RNA\n(log2 normalised counts)",
+      ylab = "IgM RNA\n(log2 normalised counts)",
+      xlim = c(0,16),
+      ylim = c(0,16),
+      col = sce$named_clusters) + theme_pubr(legend = "bottom") + 
+    guides(col = guide_legend("", ncol = 2)) +
+    labs(title = "all clusters") +
+  theme(legend.text = ggtext::element_markdown(), 
+        aspect.ratio = 1),
+qplot(y = logcounts(sce[,sce$clusters == "4"])["ENSG00000211899",], x =logcounts(sce[,sce$clusters == "4"])["ENSG00000211898",],
+      xlab = "IgD RNA (log2 normalised counts)",
+      ylab = "IgM RNA (log2 normalised counts)",
+            xlim = c(0,16),
+      ylim = c(0,16),
+       colour = I("black")) +  
+    labs(title = "naive cells", subtitle = "Line: y=x") + theme_pubr() + 
+  geom_abline(a = 1, b = 0) +
+  theme(aspect.ratio = 1),
+ncol =2)
+
+rm(sce) # we re-load specific versions of it later, to complete the VDJPuzzle analysis.
+```
+
+## VDJPuzzle - re-evaluate lower expressed IgH chains
+
+```{r}
+igm.igh <- all.igh %>% 
+  group_by(CellID) %>% 
+  filter(`Isotype/Constant` %in% c("IGHM")) %>%
+  dplyr::add_count(CellID, name = "n_of_igm_per_cell")
+
+igd.igh <- all.igh %>% 
+  group_by(CellID) %>% 
+  filter(`Isotype/Constant` %in% c("IGHD")) %>%
+  dplyr::add_count(CellID, name = "n_of_igd_per_cell")
+
+
+
+dupli.igd <- summary(duplicated(paste(igd.igh$CellID,
+              igd.igh$v_sequence_alignment,
+              igd.igh$d_sequence_alignment,
+              igd.igh$j_sequence_alignment,
+              igd.igh$cdr3,
+              igd.igh$v_call,
+              igd.igh$d_call,
+              igd.igh$j_call)))
+          
+
+igd.igm.comparison <- summary(paste(igd.igh$CellID,
+              igd.igh$v_sequence_alignment,
+              igd.igh$d_sequence_alignment,
+              igd.igh$j_sequence_alignment,
+              igd.igh$cdr3,
+              igd.igh$v_call,
+              igd.igh$d_call,
+              igd.igh$j_call)
+              %in% 
+          paste(igm.igh$CellID,
+              igm.igh$v_sequence_alignment,
+              igm.igh$d_sequence_alignment,
+              igm.igh$j_sequence_alignment,
+              igm.igh$cdr3,
+              igm.igh$v_call,
+              igm.igh$d_call,
+              igm.igh$j_call))
+
+igd.cellIDs.that.also.have.igm <- igd.igh$CellID[ paste(igd.igh$CellID,
+              igd.igh$v_sequence_alignment,
+              igd.igh$d_sequence_alignment,
+              igd.igh$j_sequence_alignment,
+              igd.igh$cdr3,
+              igd.igh$v_call,
+              igd.igh$d_call,
+              igd.igh$j_call)
+              %in% 
+          paste(igm.igh$CellID,
+              igm.igh$v_sequence_alignment,
+              igm.igh$d_sequence_alignment,
+              igm.igh$j_sequence_alignment,
+              igm.igh$cdr3,
+              igm.igh$v_call,
+              igm.igh$d_call,
+              igm.igh$j_call) ]
+
+
+
+igd.cellIDs.that.also.have.igm <- igd.cellIDs.that.also.have.igm[! duplicated(igd.cellIDs.that.also.have.igm)]
+
+#### 
+#
+# Now we need to compare this to the transcriptomics dataset.
+#
+####
+load("../cohort_2016_17/data/SCE_incl_NTC.RData")
+sce <- sce[!is.na(sce$PID), ]
+## Need to match up the sample naming:
+head(colnames(sce))
+#
+igd.cellIDs.that.also.have.igm <- 
+  igd.cellIDs.that.also.have.igm %>%
+  gsub(. , pattern = "IGH_", replacement = "") %>%
+  gsub(., pattern = "L001", replacement = "L001.GRCh38.hisat2.bam") %>%
+  gsub(., pattern = "_", replacement = ".")
+
+
+## Check the labels are now matching:
+summary(igd.cellIDs.that.also.have.igm %in% colnames(sce))
+
+## But we really want to subset based on transcriptomic QC passing cells
+load("../cohort_2016_17/data/SCE_QC_pass.RData")
+## Check the labels are now matching:
+summary(igd.cellIDs.that.also.have.igm %in% colnames(sce))
+
+## Really, we wnat to use the finalised sce (where the plasma cells have been removed):
+## (loading the QC pass SCE is useful to understand that the 1 IgD+ cell that is discarded is done for QC reasons, rather than being a PB)
+load("../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+## Check the labels are now matching:
+present.in.sce <- summary(igd.cellIDs.that.also.have.igm %in% colnames(sce))
+
+
+#### subset the SCE
+subset.sce <- sce[, colnames(sce) %in% igd.cellIDs.that.also.have.igm ]
+```
+
+## Supporting analysis
+
+Of `r nrow(all.igh)` IgH chains, there are `r nrow(igm.igh)` heavy chains that use IgM (in `r nlevels(factor(igm.igh$CellID))` cells), and `r nrow(igd.igh)` that use IgD (in `r nlevels(factor(igd.igh$CellID))` cells).
+
+Of the `r nrow(igd.igh)` IgD+ heavy chains (`r summary(igd.igh$productive %in% "T")[["TRUE"]]` are productive), `r dupli.igd[[3]]` chains appear identical (present in the same cell with identity at V, D, J and CDR3 nucleotide sequences, and V,D & J allele calls), and `r igd.igm.comparison[[3]]` are present in the IgM heavy chains - as for IgD comparison - same sequence in the __same__ cell.
+
+Of the `r length(igd.cellIDs.that.also.have.igm)` IgD+IgM+ cells, `r present.in.sce[[3]]` cells have transcriptomic data that pass QC.
+
+```{r results='hide'}
+## Recapitulate the relevant part of figure 3:
+source("../scripts/BCRtools.R")
+VDJ.chain.results <- VDJPuzzleimporter()
+
+VDJ.bcr <- VDJ.chain.results %>%
+  # Join all 3 together:
+  #plyr::join_all(by="label") %>%
+  
+  # Here we just need for the IgH data, which is the first data.frame:
+  .[[1]] %>%
+  # Select just the first segment that is called for each cell.
+  # AND select just the V family rather than alleles (eg IGHV-69, rather than 69*01)
+  mutate(bcr = paste(gsub(v_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(d_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(j_call,pattern = "\\*.*$", replacement = ""),
+                     #gsub(v_call.1,pattern = "\\*.*$", replacement = ""),
+                     #gsub(j_call.1,pattern = "\\*.*$", replacement = ""),
+                     #gsub(v_call.2,pattern = "\\*.*$", replacement = ""),
+                     #gsub(j_call.2,pattern = "\\*.*$", replacement = ""),
+                     sep = "_")) %>%
+  # Remove NAs:
+  mutate(bcr = gsub(bcr, pattern = "NA|N/A", replacement = "")) %>%
+  # Remove duplicate underscores and trailing underscores:
+  mutate(bcr = gsub(bcr, pattern = "__|_$", replacement = "")) %>%
+  # A full BCR structure would contain the string "IG" 5 times:
+  ## But for supporting analysis, we only have IgH, so 3 times is needed
+  mutate(bcr = ifelse(str_count(bcr, pattern = "IG") ==3, bcr, NA)) %>%
+  
+  # As above, but for igh only
+  mutate(igh = paste(gsub(v_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(d_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(j_call,pattern = "\\*.*$", replacement = ""), sep = "_")) %>%
+  # Remove NAs:
+  mutate(igh = gsub(igh, pattern = "NA|N/A", replacement = "")) %>%
+  # Remove duplicate underscores and trailing underscores:
+  mutate(igh = gsub(igh, pattern = "__|_$", replacement = "")) %>%
+  # A full igh structure would contain the string "IG" 3 times:
+  mutate(igh = ifelse(str_count(igh, pattern = "IG") ==3, igh, NA))
+
+
+
+VDJ.bcr$label <- gsub(VDJ.bcr$label, pattern = "_", replacement = "\\.") # change the '_' in label to '.'
+
+
+
+```
+```{r add_vdjpuzzle_to_sce, warning=FALSE, message=FALSE, results='hide'}
+
+load("../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+### Now need to add these data to our SCE ###
+# There are 18 samples that get a IGH but fail QC/PB contaminant
+summary(VDJ.bcr$label %in% gsub(sce$short.name, pattern = ".L001.*$", replacement = ""))
+
+# Subset the VDJ matrix to those cells that have QC pass expression data:
+VDJ.bcr <- VDJ.bcr[VDJ.bcr$label %in% gsub(sce$short.name, pattern = ".L001.*$", replacement = ""), ]
+
+# Make the expression of the heavy chain numeric, and a log2 version:
+VDJ.bcr$Expression <- as.numeric(VDJ.bcr$Expression)
+VDJ.bcr$Log.Expression <- log2(VDJ.bcr$Expression)
+
+# Extract coldat from SCE
+coldat <- data.frame(colData(sce))
+
+# Make an appropriate column to merge with:
+coldat$shorter.name <- gsub(coldat$short.name, pattern = ".L001.*$", replacement = "")
+
+# Do the merge:
+coldat <- dplyr::left_join(coldat, VDJ.bcr, by = c("shorter.name" = "label"))
+
+# Fix rownames:
+rownames(coldat) <- coldat$short.name
+
+# Check that sample order has been preserved (should be TRUE).
+all(rownames(coldat) == colnames(sce))
+
+# Replace colData with the added BCR info.
+colData(sce) <- DataFrame(coldat)
+
+# helpful to have this factor for plotting:
+sce$named_clusters <- factor(
+  c("*FCRL5*+ B mem",
+    "*MALAT1*+ B mem",
+    "*LY9*+ B mem",
+    "naive",
+    "*MARCKS*+ B mem")[sce$clusters],
+    levels = 
+      c("*FCRL5*+ B mem",
+    "*MALAT1*+ B mem",
+    "*LY9*+ B mem",
+    "naive",
+    "*MARCKS*+ B mem"))
+```
+
+```{r}
+
+sce$IgDIgM <- factor("Single IgH", levels = c("Single IgH", "IgD IgM"))
+
+
+#### subset the SCE
+sce$IgDIgM[colnames(sce) %in% igd.cellIDs.that.also.have.igm ] <- "IgD IgM"
+
+#########
+plot_grid(
+  
+
+  
+   
+  ggbarplot(data = colData(sce) %>%
+              as.data.frame() %>%
+              group_by(IgDIgM, Isotype.Constant, named_clusters) %>%
+              dplyr::summarise(n = n()) %>%
+              mutate(freq = n / sum(n)),
+            fill = "named_clusters", y= "n", x = "Isotype.Constant",
+            ylab = "# of cells", xlab = "Isotype, by highest expressed IgH",
+            position = position_dodge(),
+            legend = "none", facet.by = c( "IgDIgM")) + 
+    labs(title = "IgD+IgM+ BCR cells\nin UMAP space"
+         #subtitle = "IgD IgM BCRs are identical for V, D, J, CDR3 nucleotide sequence & allele calls"
+         ) + 
+    rotate() +
+    guides(fill = guide_legend("UMAP cluster", ncol = 2)) + 
+    theme(legend.text = ggtext::element_markdown()),
+  
+  ggbarplot(data = colData(sce) %>%
+              as.data.frame() %>%
+              group_by(IgDIgM, Isotype.Constant, named_clusters) %>%
+              dplyr::summarise(n = n()) %>%
+              mutate(freq = n / sum(n)),
+            fill = "named_clusters", y= "freq", x = "Isotype.Constant",
+            ylab = "Proportion of cells", xlab = "Isotype, by highest expressed IgH",
+            legend = "bottom", facet.by = c( "IgDIgM")) + 
+    labs(#title = "IgD+IgM+ BCR cells in UMAP space", 
+         caption = "\nIgD IgM BCRs are identical for V, D, J, CDR3 nucleotide sequence & allele calls") + 
+    rotate() + rotate_x_text() + 
+    guides(fill = guide_legend("UMAP cluster", ncol = 2)) + 
+    theme(legend.text = ggtext::element_markdown()),
+
+  ncol = 2)
+  
+
+```
+
+
+```{r}
+
+igm.igh.unique <- igm.igh[! duplicated(igm.igh$CellID), ]
+igd.igh.unique <- igd.igh[! duplicated(igd.igh$CellID), ]
+
+summary(igm.igh.unique$CellID %in% igd.igh.unique$CellID)
+summary(igd.igh.unique$CellID %in% igm.igh.unique$CellID)
+
+shared <- intersect(igm.igh.unique$CellID, igd.igh.unique$CellID)
+
+igm.igh.unique.shared <- igm.igh.unique[match( shared, igm.igh.unique$CellID), ]
+igd.igh.unique.shared <- igd.igh.unique[match( shared, igd.igh.unique$CellID), ]
+
+all(igd.igh.unique.shared$CellID == igm.igh.unique.shared$CellID)
+
+igd.igh.unique.shared$Expression <- as.numeric(igd.igh.unique.shared$Expression)
+igm.igh.unique.shared$Expression <- as.numeric(igm.igh.unique.shared$Expression)
+
+
+qplot(y = igd.igh.unique.shared$Expression, x = igm.igh.unique.shared$Expression,
+      xlim = c(0,25), ylim = c(0,25),
+      xlab = "IgM Expression", 
+      ylab = "IgD Expression") + 
+  theme_pubr() + 
+  labs(title = "Per cell expression of identical IgM and IgD BCRs") +
+  geom_abline(a = 1, b = 0, col = "darkgreen") +
+  annotate(geom = "text", x = 3, y = 20, 
+           label = 
+             paste("IgD>IgM",
+                   summary(igm.igh.unique.shared$Expression > igd.igh.unique.shared$Expression)[["FALSE"]],
+           "cells")) +
+    annotate(geom = "text", x = 20, y = 3, 
+           label = 
+             paste("IgM>IgD",
+                   summary(igm.igh.unique.shared$Expression > igd.igh.unique.shared$Expression)[["TRUE"]],
+           "cells"))
+
+
+
+
+
+
+```
+
+\newpage
+
+
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```
+

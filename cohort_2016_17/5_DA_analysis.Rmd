@@ -1,0 +1,235 @@
+---
+title: "Differential abundance analysis for the 2016-17 cohort"
+author: "EJC"
+date: "25/06/2020, based on code from May 2019"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+The Babraham compute cluster does not contain a global tex installation, so a local tex is added to $PATH to allow knitting to pdf.
+
+```{r}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = T, tidy = T, warning = F, message = T, fig.width = 7, fig.height = 4.5, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r}
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+library(edgeR)
+
+sce$sample <- factor(paste(sce$phenotype, sce$PID, sep = "_") )
+
+abundances <-   
+  table(sce$clusters,sce$sample)
+
+## Make coumne metadata + DGEList
+extra.info <- colData(sce)[match(colnames(abundances), sce$sample),]
+
+y.ab <- DGEList(abundances, samples=extra.info)
+y.ab
+
+# Filter out low abundance labels:
+# Skipped as tends to filter out all labels
+# (we know these are biologically meaningful clusters, so should not be filtered out on count alone).
+# keep <- filterByExpr(y.ab, group=y.ab$samples$day0)
+# y.ab <- y.ab[keep,]
+# summary(keep)
+
+design <- model.matrix(~factor(PID) + factor(day), y.ab$samples)
+
+y.ab <- calcNormFactors(y.ab, method="TMMwsp") # we need to normalise to 'library' size as day 0 has many fewer cells. 
+
+
+y.ab <- estimateDisp(y.ab, design, trend="none")
+summary(y.ab$common.dispersion)
+
+plotBCV(y.ab, cex=1)
+
+fit.ab <- glmQLFit(y.ab, design, robust=TRUE, abundance.trend=FALSE)
+summary(fit.ab$var.prior)
+summary(fit.ab$df.prior)
+
+plotQLDisp(fit.ab, cex=1)
+
+res <- glmQLFTest(fit.ab, coef=ncol(design))
+summary(decideTests(res))
+
+topTags(res)
+
+### For young only:
+
+y.ab.Y <- DGEList(abundances[, grepl(colnames(abundances), pattern = "young")], 
+                  samples=extra.info[ grepl(colnames(abundances), pattern = "young"), ])
+y.ab.Y
+
+# Filter out low abundance labels:
+# Skipped as tends to filter out all labels
+# (we know these are biologically meaningful clusters, so should not be filtered out on count alone).
+# keep <- filterByExpr(y.ab, group=y.ab$samples$day0)
+# y.ab <- y.ab[keep,]
+# summary(keep)
+
+design.Y <- model.matrix(~factor(PID) + factor(day), y.ab.Y$samples)
+
+y.ab.Y <- calcNormFactors(y.ab.Y, method="TMMwsp") # we need to normalise to 'library' size as day 0 has many fewer cells. 
+
+
+y.ab.Y <- estimateDisp(y.ab.Y, design.Y, trend="none")
+summary(y.ab.Y$common.dispersion)
+
+plotBCV(y.ab.Y, cex=1)
+
+fit.ab.Y <- glmQLFit(y.ab.Y, design.Y, robust=TRUE, abundance.trend=FALSE)
+summary(fit.ab.Y$var.prior)
+summary(fit.ab.Y$df.prior)
+
+plotQLDisp(fit.ab.Y, cex=1)
+
+res.Y <- glmQLFTest(fit.ab.Y, coef=ncol(design.Y))
+topTags(res.Y)
+
+
+### For old only:
+y.ab.O <- DGEList(abundances[, grepl(colnames(abundances), pattern = "old")], 
+                  samples=extra.info[ grepl(colnames(abundances), pattern = "old"), ])
+
+
+# Filter out low abundance labels:
+# Skipped as tends to filter out all labels
+# (we know these are biologically meaningful clusters, so should not be filtered out on count alone).
+# keep <- filterByExpr(y.ab, group=y.ab$samples$day0)
+# y.ab <- y.ab[keep,]
+# summary(keep)
+
+design.O <- model.matrix(~factor(PID) + factor(day), y.ab.O$samples)
+
+y.ab.O <- calcNormFactors(y.ab.O, method="TMMwsp") # we need to normalise to 'library' size as day 0 has many fewer cells. 
+
+
+y.ab.O <- estimateDisp(y.ab.O, design.O, trend="none")
+summary(y.ab.O$common.dispersion)
+
+plotBCV(y.ab.O, cex=1)
+
+fit.ab.O <- glmQLFit(y.ab.O, design.O, robust=TRUE, abundance.trend=FALSE)
+summary(fit.ab.O$var.prior)
+summary(fit.ab.O$df.prior)
+
+plotQLDisp(fit.ab.O, cex=1)
+
+res.O <- glmQLFTest(fit.ab.O, coef=ncol(design.O))
+topTags(res.O)
+
+
+
+###########################
+### For day0 only:
+y.ab.day0 <- DGEList(abundances[, grepl(colnames(abundances), pattern = "d0")], 
+                  samples=extra.info[ grepl(colnames(abundances), pattern = "d0"), ])
+
+
+# Filter out low abundance labels:
+# Skipped as tends to filter out all labels
+# (we know these are biologically meaningful clusters, so should not be filtered out on count alone).
+# keep <- filterByExpr(y.ab, group=y.ab$samples$day0)
+# y.ab <- y.ab[keep,]
+# summary(keep)
+
+design.day0 <- model.matrix(~factor(age), y.ab.day0$samples)
+
+y.ab.day0 <- calcNormFactors(y.ab.day0, method="TMMwsp") # we need to normalise to 'library' size as day 0 has many fewer cells. 
+
+
+y.ab.day0 <- estimateDisp(y.ab.day0, design.day0, trend="none")
+summary(y.ab.day0$common.dispersion)
+
+plotBCV(y.ab.day0, cex=1)
+
+fit.ab.day0 <- glmQLFit(y.ab.day0, design.day0, robust=TRUE, abundance.trend=FALSE)
+summary(fit.ab.day0$var.prior)
+summary(fit.ab.day0$df.prior)
+
+plotQLDisp(fit.ab.day0, cex=1)
+
+res.day0 <- glmQLFTest(fit.ab.day0, coef=ncol(design.day0))
+topTags(res.day0)
+
+########
+### For day42 only:
+y.ab.day42 <- DGEList(abundances[, grepl(colnames(abundances), pattern = "d42")], 
+                  samples=extra.info[ grepl(colnames(abundances), pattern = "d42"), ])
+
+
+# Filter out low abundance labels:
+# Skipped as tends to filter out all labels
+# (we know these are biologically meaningful clusters, so should not be filtered out on count alone).
+# keep <- filterByExpr(y.ab, group=y.ab$samples$day42)
+# y.ab <- y.ab[keep,]
+# summary(keep)
+
+design.day42 <- model.matrix(~factor(age), y.ab.day42$samples)
+
+y.ab.day42 <- calcNormFactors(y.ab.day42, method="TMMwsp") # we need to normalise to 'library' size as day 0 has many fewer cells. 
+
+
+y.ab.day42 <- estimateDisp(y.ab.day42, design.day42, trend="none")
+summary(y.ab.day42$common.dispersion)
+
+plotBCV(y.ab.day42, cex=1)
+
+fit.ab.day42 <- glmQLFit(y.ab.day42, design.day42, robust=TRUE, abundance.trend=FALSE)
+summary(fit.ab.day42$var.prior)
+summary(fit.ab.day42$df.prior)
+
+plotQLDisp(fit.ab.day42, cex=1)
+
+res.day42 <- glmQLFTest(fit.ab.day42, coef=ncol(design.day42))
+topTags(res.day42)
+
+```
+
+# Example plot - proportion of cells at each timepoint by individiual
+
+See figure .Rmd for final version.
+
+```{r}
+
+library(ggpubr)
+
+abundances.percent <- apply(abundances, MARGIN = 1, function(x){ x / colSums(abundances) })
+
+tableau10medium = c("#729ECE", "#FF9E4A", "#67BF5C", "#ED665D",
+                               "#AD8BC9", "#A8786E", "#ED97CA", "#A2A2A2",
+                               "#CDCC5D", "#6DCCDA")
+
+
+abundances.percent <- reshape2::melt(abundances.percent)
+abundances.percent$Var2 %<>% factor(.)
+
+abundances.percent$age <- factor(ifelse(grepl(abundances.percent$Var1, pattern =  "old"), "old", "young"))
+abundances.percent$day <- factor(ifelse(grepl(abundances.percent$Var1, pattern =  "d42"), "d42", "d0"))
+abundances.percent$PID <- factor(gsub(pattern = ".*_", replacement = "", abundances.percent$Var1))
+
+ggbarplot(data = abundances.percent, x= "PID", xlab = "", y="value", ylab = "%", fill = "Var2", palette = tableau10medium, legend = "none") + facet_wrap(~ age + day, scales = "free")
+
+```
+
+# Save important objects
+
+```{r}
+
+save(res, res.O, res.Y, res.day0, res.day42, abundances, abundances.percent, file = "data/DA_analysis_results.RData")
+
+```

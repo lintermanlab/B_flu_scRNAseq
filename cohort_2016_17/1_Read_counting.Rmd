@@ -1,0 +1,75 @@
+---
+title: "Read counting for the 2016-17 cohort"
+author: "EJC"
+date: "25/06/2020, based on code from May 2019"
+output: pdf_document
+---
+
+The Babraham compute cluster does not contain a global tex installation, so a local tex is added to $PATH to allow knitting to pdf.
+
+```{r}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = T, tidy = T, warning = F, message = T, fig.width = 7, fig.height = 4.5, tidy.opts=list(width.cutoff=60))
+```
+
+```{r find_BAM_files}
+
+## This code will need modification to reflect local file structure.
+
+fls <- list.files(
+  # on BI cluster all sequencing data is stored:
+   path = "/bi/sequencing/",
+     # This gets all hisat2 aligned bams
+      pattern = "hisat2.bam", 
+       # Look in all subdirectories
+    recursive = T,
+       # Get full path:
+      full.names = T)
+
+# We only want ALFNA samples
+# [ignore other BI sequencing projects shared with me]
+fls <- fls [ grepl(fls, pattern = "ALFNA")]
+
+# Select the HA+ B cell data:
+fls <- fls [ grepl(fls, pattern = "HA")]
+
+# Remove the pilot sample, 160Y_d42 from ALFNA14.
+fls <- fls [ ! grepl(fls, pattern = "160Y")]
+
+bam <- basename(fls)
+
+ifelse(
+  any(grepl(list.dirs(), pattern = "/data")),
+  "Data directory already exists",
+  # Data directory should be made:
+  system("mkdir data"))
+
+save(bam, fls, file = "data/bam_fls_paths.RData")
+
+```
+
+```{r count_features}
+
+library(Rsubread)
+
+counts <- featureCounts(files = fls, 
+                         ## change this path to your local gtf:
+                         annot.ext = "/bi/scratch/Genomes/Human/GRCh38_ERCC/Homo_sapiens.GRCh38.87.gtf",
+                         isGTFAnnotationFile = T, useMetaFeatures = T, nthreads = 7 )
+
+save(counts, file = "data/Rsubread_counts.RData")
+
+```
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

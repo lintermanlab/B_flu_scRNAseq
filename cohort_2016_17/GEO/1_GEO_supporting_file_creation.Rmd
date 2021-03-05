@@ -1,0 +1,104 @@
+---
+title: "SCE assembly for the 2016-17 cohort"
+author: "EJC"
+date: "Feb 2021"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+
+The Babraham compute cluster does not contain a global tex installation, so a local tex is added to $PATH to allow knitting to pdf.
+
+```{r}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = T, tidy = T, warning = F, message = T, fig.width = 7, fig.height = 4.5, tidy.opts=list(width.cutoff=60))
+
+```
+
+
+# Gwt counts
+
+```{r get_counts}
+library(SingleCellExperiment)
+
+load("../data/SCE_incl_NTC.RData") # this contains all raw counts, incl 8 NTCs.
+
+sce <- sce[, ! is.na(sce$PID)]
+
+```
+
+# Make annotations the same as the GEO .xlsx submission file
+
+```{r}
+
+GEO_compatible_names <- paste(sce$PID, 
+                              sce$day,
+                              sce$age,
+                              sce$lib_plate,
+                              sce$lib_well,
+                              sep = "_")
+
+# There is one library plate called 'lib' rather than 'cDNA':
+GEO_compatible_names <- gsub(GEO_compatible_names, pattern = "lib", replacement = "cDNA")
+
+###########
+
+count.matrix <- counts(sce)
+colnames(count.matrix) <- GEO_compatible_names
+
+```
+
+# Load in the GEO submission xlsx to check column names
+
+```{r}
+library(openxlsx)
+
+GEO <- read.xlsx("GEO submission.xlsx", sheet = 1, startRow = 22)
+
+GEO <- GEO[1:952, ] # the 10 x 96 well plates are covered in the 'samples' table here. (lower down is PROTOCOLS etc).
+
+#####
+
+# Check both sets of names contain each other:
+all(GEO$title %in% colnames(count.matrix))
+all(colnames(count.matrix) %in% GEO$title)
+
+######
+# Make the order the same:
+ordered.count.matrix <- count.matrix[, GEO$title]
+
+# check column names are identical:
+all(colnames(ordered.count.matrix) == GEO$title)
+all(GEO$title == colnames(ordered.count.matrix))
+
+```
+
+# Write out supporting file
+
+```{r}
+write.csv(ordered.count.matrix, file = "GEO_supporting_processed_data_file_raw_count_matrix.csv")
+
+# ~ 110Mb file.
+
+# Gzip:
+system("gzip GEO_supporting_processed_data_file_raw_count_matrix.csv")
+# ~ 7Mb file.
+
+```
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```

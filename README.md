@@ -40,5 +40,6 @@ Each figure is drawn in turn.
 These Rmarkdown files require the cohort_2016_17 data sub-directory.
 Where code execution is quick (<1 minute), the code for that figure is self-contained.
 Where code execution is longer, a separate processing Rmd has been written in the `cohort_2016_17` directory.
+Draft figure legends are included on the second page of each generated pdf.
 
 

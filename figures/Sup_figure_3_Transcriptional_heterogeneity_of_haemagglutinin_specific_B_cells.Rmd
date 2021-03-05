@@ -1,0 +1,271 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 8, fig.height = 4, tidy.opts=list(width.cutoff=60))
+```
+
+```{r SCE_load}
+
+# SingleCellExperiment load
+
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(magrittr) # for %<>% operator.
+library(MultiAssayExperiment) # for the HAI titre panels
+
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+load(file = "../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+
+library(ggpubr) # for themes for plots.
+
+```
+
+```{r DEGs}
+
+# Adjust parameters here:
+lfc <- 2
+pval.type <- "any" # 'any' means return highly ranked genes that are DE between group X and ANY OTHER group(s).
+fdr <- 0.01
+# Do not adjust below here.
+
+markers.up <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type,
+  direction = "up",
+  lfc=lfc, test.type ="t" )
+
+markers.down <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type,
+  direction = "down",
+  lfc=lfc, test.type ="t" )
+
+markers <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type, lfc=lfc, test.type ="t" )
+
+library(org.Hs.eg.db)
+# Map each list of markers to gene symbol:
+markers.up <- lapply(markers.up, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+markers.down <- lapply(markers.down, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+markers <- lapply(markers, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+
+# Write out the significant genes (note lfc set at start of this chunk)
+markers.up <- lapply(markers.up, function(x) {
+     (x[x$FDR<fdr,])
+ })
+markers.down <- lapply(markers.down, function(x) {
+     (x[x$FDR<fdr,])
+ })
+markers <- lapply(markers, function(x) {
+     (x[x$FDR<fdr,])
+ })
+
+# number of marker genes for each cluster:
+number.of.genes.up <- as.data.frame(matrix(lapply(markers.up, nrow), byrow = T))
+number.of.genes.down <- as.data.frame(matrix(lapply(markers.down, nrow), byrow = T))
+number.of.genes <- as.data.frame(matrix(lapply(markers, nrow), byrow = T))
+
+colnames(number.of.genes.up) <- "number"
+number.of.genes.up$number <- as.numeric(number.of.genes.up$number)
+number.of.genes.up$cluster <- factor(c(1:length(markers)))
+colnames(number.of.genes.down) <- "number"
+number.of.genes.down$number <- as.numeric(number.of.genes.down$number)
+number.of.genes.down$cluster <- factor(c(1:length(markers)))
+colnames(number.of.genes) <- "number"
+number.of.genes$number <- as.numeric(number.of.genes$number)
+number.of.genes$cluster <- factor(c(1:length(markers)))
+```
+
+```{r violins}
+library(Seurat)
+
+sce.seurat <- as.Seurat(sce, counts = "counts", data = "logcounts")
+
+####
+# Adjust parameters here:
+lfc.v <- 0.5
+pval.type <- "all" # 'all' means return highly ranked genes that are DE between group X and ALL OTHER group(s).
+fdr.v <- 0.25
+# Do not adjust below here.
+
+dot.plot.markers.up <- findMarkers(
+  sce, sce$clusters, pval.type = pval.type,
+  direction = "up",
+  lfc=lfc.v, test.type ="t" )
+
+library(org.Hs.eg.db)
+# Map each list of markers to gene symbol:
+dot.plot.markers.up <- lapply(dot.plot.markers.up, function(x) {
+  y <- cbind(x,
+             "symbol"= mapIds(
+               org.Hs.eg.db,
+               keys=rownames(x),
+               keytype="ENSEMBL", column="SYMBOL", multiVals = "first"))
+  return(y)
+})
+#####
+
+# Wanted genes come from two places
+# 1. t-tests (above) - 2 genes from each.
+# 2. curated important B cell genes.
+
+dot.plot.markers.up.2 <- lapply(dot.plot.markers.up, function(x) {
+  x %>% .[!is.na(.$symbol), ] %>% head(3) 
+})
+
+wanted <- unlist(lapply(dot.plot.markers.up.2, rownames))
+
+labels <- unlist(lapply(dot.plot.markers.up.2, function(x) {x$symbol}))
+names(labels) <- wanted
+
+
+# curated genes:
+curated.selected <- c("FCRL5", "CD86", 
+                      "TBX21","BCL6","PRDM1","PAX5",
+                      "XRCC6","AICDA",
+            "CCR7", "SELL", "CXCR4",
+            "CXCR3", "TNFRSF13B",
+             "FCER2", "CD27", "CD24")
+
+curated.wanted <- mapIds(
+  org.Hs.eg.db,
+  keys=curated.selected,
+  keytype="SYMBOL", column="ENSEMBL", multiVals = "first")
+
+# Combine the two:
+wanted <- c(rev(wanted), curated.wanted)
+names(wanted) <- NULL
+
+names(curated.selected) <- curated.wanted
+
+labels <- c(rev(labels), curated.selected)
+
+tableau10medium = c("#729ECE", "#FF9E4A", "#67BF5C", "#ED665D",
+                               "#AD8BC9", "#A8786E", "#ED97CA", "#A2A2A2",
+                               "#CDCC5D", "#6DCCDA")
+
+# now plot:
+vlns <- list()
+for(i in 1:length(labels)) {
+  vlns[[i]] <- VlnPlot(sce.seurat,
+        features = names(labels)[i],
+        cols = tableau10medium,
+        group.by = "clusters",
+        pt.size = 0) +
+  ggtitle(labels[i]) + xlab("clusters") + ylab("exprn") +
+    scale_y_continuous(n.breaks = 4) +
+    theme(legend.position = "none", 
+          axis.ticks.x = element_blank(),
+          axis.text.x = element_blank(),
+          plot.title = element_text(face = "italic"))
+}
+
+
+
+```
+
+```{r plots}
+tableau10medium = c("#729ECE", "#FF9E4A", "#67BF5C", "#ED665D",
+                               "#AD8BC9", "#A8786E", "#ED97CA", "#A2A2A2",
+                               "#CDCC5D", "#6DCCDA")
+ymax <- round(1.1 * (max(unlist(number.of.genes$number), unlist(number.of.genes.down$number), unlist(number.of.genes.up$number))))
+
+
+up.genes <- ggbarplot(number.of.genes.up, 
+          x = "cluster", y = "number", 
+          fill = "cluster", palette = tableau10medium, 
+          legend = "none",
+              ylab = "# of features",title = "Up-regulated", ylim =  c(0,ymax),
+          label = T, lab.hjust = -1, lab.vjust = 0.5) + 
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank()) + 
+  coord_flip( ylim =  c(0,ymax)) + 
+  rotate_x_text()
+  
+down.genes <- ggbarplot(number.of.genes.down, 
+          x = "cluster", y = "number", 
+          fill = "cluster", palette = tableau10medium, 
+          legend = "none",
+              ylab = "# of features",title = "Down-regulated", ylim =  c(0,ymax),
+          label = T, lab.hjust = -1, lab.vjust = 0.5) + 
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank()) + 
+  coord_flip( ylim =  c(0,ymax)) + 
+  rotate_x_text()
+  
+```
+
+```{r fig.height = 9.5}
+cowplot::plot_grid(
+  cowplot::plot_grid(up.genes, down.genes, ncol = 2, labels = LETTERS[1:2]),
+  
+  cowplot::plot_grid(plotlist = vlns, labels = "C"),
+   
+  ncol = 1, rel_heights = c(1,5))
+```
+\newpage
+__Supplementary Figure 3: Transcriptional heterogeneity of haemagglutinin specific B cells__
+
+(A) Up-regulated differentially expressed transcripts between a cluster and _any_ other cluster, where log2 fold change >`r lfc` and Benjamini-Hochberg FDR<`r fdr`, using pairwise t-tests. For each cluster the numbers of markers is indicated.
+(B) As in (A), for down-regulated markers.
+(C) Violin plots of gene expression of the indicated gene for each fo the 5 UMAP clusters. Expression (log-transformed normalized expression) values are plotted. Colors of each UMAP cluster are the same as in (A), (B) and the main figures.
+
+\newpage
+
+```{r}
+#####
+# Specific P value for TBX21 for results text:
+#####
+
+# dot.plot.markers.up[[1]] [dot.plot.markers.up[[1]]$symbol %in% c("TBX21"),]
+# 
+# 
+# dot.plot.markers.up[[2]] [dot.plot.markers.up[[2]]$symbol %in% c("MALAT1"),]
+# dot.plot.markers.up[[3]] [dot.plot.markers.up[[3]]$symbol %in% c("LY9"),]
+# dot.plot.markers.up[[5]] [dot.plot.markers.up[[5]]$symbol %in% c("MARCKS"),]
+```
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```
