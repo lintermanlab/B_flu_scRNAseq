@@ -1,5 +1,7 @@
 ## Repository outline
 
+[![DOI](https://zenodo.org/badge/344757391.svg)](https://zenodo.org/badge/latestdoi/344757391)
+
 This code supports the manuscript Carr _et al._ BioRxiv 2021 https://biorxiv.org/cgi/content/short/2021.03.04.433942v1.
 The corresponding GEO accession is GSE167823 https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE167823.
 This repository has been updated (26 September 2022), to include changes after peer review.
