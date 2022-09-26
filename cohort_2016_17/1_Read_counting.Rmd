@@ -62,7 +62,11 @@ library(Rsubread)
 counts <- featureCounts(files = fls, 
                          ## change this path to your local gtf:
                          annot.ext = "/bi/scratch/Genomes/Human/GRCh38_ERCC/Homo_sapiens.GRCh38.87.gtf",
-                         isGTFAnnotationFile = T, useMetaFeatures = T, nthreads = 7 )
+                         isGTFAnnotationFile = T, useMetaFeatures = T,
+                        isPairedEnd = T,
+                        requireBothEndsMapped = T,
+                        countChimericFragments = F,
+                        nthreads = 7 )
 
 save(counts, file = "data/Rsubread_counts.RData")
 

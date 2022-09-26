@@ -53,10 +53,10 @@ sce <- logNormCounts(sce)
 
 # Select 25% of genes with largest variance
 dec <- modelGeneVar(sce)
-hvg <- getTopHVGs(dec, prop=0.25)
+hvg <- getTopHVGs(dec, prop=0.25) # PB exclusion do not adjust
 
 set.seed(10000)
-sce <- runPCA(sce, ncomponents=50, subset_row=hvg)
+sce <- runPCA(sce, ncomponents=50, subset_row=hvg) # PB exclusion do not adjust
 set.seed(100000)
 sce <- runUMAP(sce, dimred = 'PCA', external_neighbors=TRUE)
 
@@ -74,7 +74,12 @@ cluster.to.discard <- c(1:nlevels(sce$clusters))[apply(cluster.selector, 1, func
 
 # Discard the PB cluster, then re-do analysis:
 ## The PB cluster is so different, that % hvg or # PCs does not influence their clustering apart
-sce <- sce[, ! sce$clusters == cluster.to.discard]
+## Remove the PB cluster from a fresh SCE without any dim reductions
+## (ensures dim reduction is calculated on the orig dataset)
+sce.old <- sce
+load(file = "data/SCE_QC_pass.RData") # reload the SCE without any dim reduc
+sce <- sce[, ! sce.old$clusters == cluster.to.discard]
+rm(sce.old)
 
 set.seed(100)
 clust <- quickCluster(sce) 
@@ -82,11 +87,12 @@ clust <- quickCluster(sce)
 deconv.sf <- calculateSumFactors(sce, cluster=clust)
 # summary(deconv.sf)
 
-sce <- computeSumFactors(sce, cluster=clust, min.mean=1)
+sce <- computeSumFactors(sce, cluster=clust, min.mean=0.1)
 sce <- logNormCounts(sce)
 
-# Select 10% of genes with largest variance
-dec <- modelGeneVar(sce)
+# Select 25% of genes with largest variance
+# Select 25 PCs
+dec <- modelGeneVar(sce, min.mean = 0.1)
 hvg <- getTopHVGs(dec, prop=0.10)
 
 set.seed(10000)
@@ -98,7 +104,8 @@ sce <- runUMAP(sce, dimred = 'PCA', external_neighbors=TRUE)
 set.seed(1000000)
 g <- buildSNNGraph(sce, use.dimred = 'PCA')
 set.seed(10000000)
-sce$clusters <- factor(igraph::cluster_louvain(g)$membership)
+sce$clusters <- factor(c(5,4,2,3,1)[igraph::cluster_louvain(g)$membership]) # change cluster names
+
 ```
 
 `r sum(cluster.selector[cluster.to.discard, ])` cells within the plasmablast cluster are removed - see the supplementary figure Rmd/pdf to see feature plots supporting their identification as plasmablasts.
