@@ -2,12 +2,11 @@
 
 This code supports the manuscript Carr _et al._ BioRxiv 2021 https://biorxiv.org/cgi/content/short/2021.03.04.433942v1.
 The corresponding GEO accession is GSE167823 https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE167823.
-
-- This repository was created using RStudio and github version control.
+This repository has been updated (26 September 2022), to include changes after peer review.
 
 - R code is provided in Rmarkdown. Each .Rmd is 'knitted' to pdf.
 
-- To execute locally, it requires RStudio and R verion 3.6.1. Code has not been tested on later versions of R. (R>4 is likely to give peculiar results as its handling of file import is changed.)
+- To execute locally, it requires RStudio and R verion 3.6.1. Code has not been tested on later versions of R. (R>4 is likely to give peculiar results as its handling of file import is changed. In review, miloR and later Immcantation analysis was specifically performed in R>4 due to dependencies.).
 
 
 ### cohort_2016_17 directory
@@ -41,7 +40,6 @@ The Seurat objects themselves are too large for github. They would need re-creat
 
 Helper script to import VDJPuzzle output into R.
 
-
 ### figures directory
 
 Each figure is drawn in turn.
@@ -50,4 +48,6 @@ These Rmarkdown files require the `cohort_2016_17/data` directory. Some intermed
 
 Where code execution is quick (<1 minute), the code for that figure is self-contained.
 Where code execution is longer, a separate processing Rmd has been written in the `cohort_2016_17` directory.
-Draft figure legends are included on the second page of each generated pdf.
+Draft figure legends (see the accepted manuscript for final legends) are included on the second page of each generated pdf.
+
+The spectral cytometry data was analysed separately, using code available elsewhere. 
