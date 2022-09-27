@@ -1,0 +1,510 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document:
+    keep_tex: no
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = FALSE, message = FALSE, error = FALSE, results = "hide", fig.width = 8, fig.height = 10.5, tidy.opts=list(width.cutoff=60))
+```
+
+```{r panel_A, warning=FALSE, message=FALSE}
+
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+
+load("../Turner_dataset_reanalysis/seurat_objects/FNA_transcriptomes_AnchorIntegrated.RData")
+
+# switch to integrated assay. The variable features of this assay are automatically
+# set during IntegrateData
+DefaultAssay(fna.integrated) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+fna.integrated <- ScaleData(fna.integrated, verbose = FALSE)
+fna.integrated <- RunPCA(fna.integrated, npcs = 20, verbose = FALSE)
+
+fna.integrated <- FindNeighbors(fna.integrated, dims = 1:20)
+fna.integrated <- FindClusters(fna.integrated, resolution = 0.05)
+
+fna.integrated <- RunUMAP(fna.integrated, reduction = "pca", dims = 1:20)
+
+panelA <- DimPlot(fna.integrated, reduction = "umap", 
+                  group.by = "seurat_clusters",
+                  cols = "Set2")
+
+panelA <- panelA + theme_pubr(legend = "bottom") +
+  labs(colour = "FNA\nclusters")
+
+```
+
+```{r}
+#### PANEL B - Dotplot of selected marker genes to identify B cells in FNA.
+
+DefaultAssay(fna.integrated) <- "RNA"
+# Normalize RNA data for visualization purposes
+fna.integrated2 <- NormalizeData(fna.integrated, verbose = FALSE)
+
+
+## Turner et al. use these markers for PBMC/FNA cluster assignment:
+markers.to.plot <- c("MS4A1", "CD19", "CD79A","CD3D", "CD3E", "CD3G", "IL7R", "CD4", "CD8A","GZMB", "GNLY", "NCAM1", "CD14", "LYZ", "CST3", "MS4A7", "IL3RA", "CLEC4C", "PPBP")
+
+
+panelB <- DotPlot(fna.integrated2, features = c(markers.to.plot), 
+   scale.by = "size",
+        dot.scale = 4,
+        cols = c("lightgrey", "darkgreen")) 
+
+panelB <- panelB + rotate_x_text() +
+  theme(axis.text.x = element_text(face = "italic"))
+
+```
+
+
+```{r}
+
+# Housekeeping.
+## this is a big dataset, which is 'resting' in RAM
+fna.number <- length(Idents(fna.integrated))
+
+# Clusters 1, 4 and 6 are B cells
+fna.B <- subset(fna.integrated, idents = c("1", "4", "6"))
+
+rm(fna.integrated, fna.integrated2)
+
+```
+
+```{r}
+
+### PANEL C. dotplot for FNA B cells.
+
+## FNA B cells identified in panels A + B.
+## The UMAP of FNA B cells alone is figure 5A.
+## This chunk plots the corresponding dotplot of the genes that Turner et al. used to define B cell subsets.
+
+#load("../Turner_dataset_reanalysis/seurat_objects/1_FNA_transcriptomes_AnchorIntegrated_just_B_cells.RData")
+
+## STEP A - re-cluster (the saved object has the whole FNA clustering data attached)
+DefaultAssay(fna.B) <- "integrated" # set explicitly, so we re-cluster on integrated anchors.
+
+# Run the standard workflow for visualization and clustering
+fna.B <- ScaleData(fna.B, verbose = FALSE)
+fna.B <- RunPCA(fna.B, npcs = 20, verbose = FALSE)
+
+fna.B <- FindNeighbors(fna.B, dims = 1:20)
+fna.B <- FindClusters(fna.B, resolution = 0.05) # Turner used 0.2, for this integration approach 0.05 gives biologically relevant clusters.
+
+fna.B <- RunUMAP(fna.B, reduction = "pca", dims = 1:20)
+
+## STEP B - Dotplot
+# Turner definitions
+gcb.markers <- c("BCL6", "RGS13", "MEF2B", "STMN1", "ELL3", "SERPINA9")
+
+
+DefaultAssay(fna.B) <- "RNA"
+# Normalize RNA data for visualization purposes
+fna.B <- NormalizeData(fna.B, verbose = TRUE) # this has been done already in this object.
+
+# Based on the dotplot, we can annotate cell types:
+## During analysis, the dotplot was drawn first, and then RenameIdents()
+## For this panel, we want to show an appropriately labelled plot.
+fna.B <- RenameIdents(object = fna.B,'0' = 'mem resting', '1' = 'naive', '2' = 'activated', '3' = 'germinal centre', '4' = 'plasma cell')
+
+panelC <- DotPlot(fna.B, 
+                  features = c( "TCL1A", "IL4R", "CCR7", "IGHM", "IGHD",
+                                   gcb.markers,
+                                      "XBP1", "IRF4", "SEC11C", "FKBP11", "JCHAIN", "PRDM1",
+                                    "TNFRSF13B", "CD24", "CD27","TBX21", "FCRL5", "ITGAX", "NKG7", "ZEB2", "CR2"),
+                     scale.by = "size",
+        dot.scale = 4,
+        cols = c("lightgrey", "darkorchid"))
+
+panelC <- panelC + rotate_x_text() +
+  theme(axis.text.x = element_text(face = "italic"))
+
+# Housekeeping - free up some RAM
+rm(fna.B)
+```
+
+
+```{r}
+
+### PANEL D. IgD- PBMC UMAP
+
+load("../Turner_dataset_reanalysis/seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated.RData")
+
+# switch to integrated assay. The variable features of this assay are automatically
+# set during IntegrateData
+DefaultAssay(pbmc.integrated) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+pbmc.integrated <- ScaleData(pbmc.integrated, verbose = FALSE)
+pbmc.integrated <- RunPCA(pbmc.integrated, npcs = 20, verbose = FALSE)
+
+pbmc.integrated <- FindNeighbors(pbmc.integrated, dims = 1:20)
+pbmc.integrated <- FindClusters(pbmc.integrated, resolution = 0.05) # Turner used 0.2.
+
+pbmc.integrated <- RunUMAP(pbmc.integrated, reduction = "pca", dims = 1:20)
+
+panelD <- DimPlot(pbmc.integrated, reduction = "umap", 
+                  group.by = "seurat_clusters", 
+                  cols = "Set3") 
+
+panelD <- panelD + 
+  theme_pubr(legend = "bottom") +
+  labs(colour = "IgD-\nPBMC\nclusters")
+
+### PANEL E - dotplot of IgD- PBMC
+
+DefaultAssay(pbmc.integrated) <- "RNA"
+# Normalize RNA data for visualization purposes
+pbmc.integrated <- NormalizeData(pbmc.integrated, verbose = FALSE)
+
+## Turner et al. use these markers for PBMC/FNA cluster assignment:
+markers.to.plot <- c("MS4A1", "CD19", "CD79A","CD3D", "CD3E", "CD3G", "IL7R", "CD4", "CD8A","GZMB", "GNLY", "NCAM1", "CD14", "LYZ", "CST3", "MS4A7", "IL3RA", "CLEC4C", "PPBP")
+
+
+panelE <- DotPlot(pbmc.integrated, features = c(markers.to.plot), 
+   scale.by = "size",
+        dot.scale = 4,
+        cols = c("lightgrey", "darkblue"))
+
+panelE <- panelE + rotate_x_text() +
+  theme(axis.text.x = element_text(face = "italic"))
+
+```
+
+
+```{r}
+pbmc.number <- length(Idents(pbmc.integrated))
+# Housekeeping.
+## this is a big dataset, which is 'resting' in RAM
+rm(pbmc.integrated)
+
+```
+
+```{r}
+
+#### PANELS F and G: Immcantation suite anaylsis of the day 28 IgD- PBMC sample.
+
+
+load("../Turner_dataset_reanalysis/seurat_objects/PBMC_IgD-ve_transcriptomes_AnchorIntegrated_just_B_cells.RData")
+
+DefaultAssay(pbmc.B) <- "integrated" # set explicitly, so we re-cluster on integrated anchors.
+
+## DEFINE UMAP CLUSTERS IN CIRCULATING IgD- PBMC:
+
+# Run the standard workflow for visualization and clustering
+pbmc.B <- ScaleData(pbmc.B, verbose = FALSE)
+pbmc.B <- RunPCA(pbmc.B, npcs = 20, verbose = FALSE)
+
+pbmc.B <- FindNeighbors(pbmc.B, dims = 1:20)
+pbmc.B <- FindClusters(pbmc.B, resolution = 0.05) # Turner used 0.2, for this integration approach 0.05 gives biologically relevant clusters.
+
+pbmc.B <- RunUMAP(pbmc.B, reduction = "pca", dims = 1:20)
+
+# Re-factor the 'day' so its in numerical order:
+pbmc.B$day <- factor(pbmc.B$day, levels = c("d0", "d5", "d12", "d28", "d60"))
+
+# Make a new factor, where the levels include the number of cells @ each day.
+pbmc.B$day_label <- factor(paste0(
+  levels(pbmc.B$day),"\n", summary(pbmc.B$day), " cells")[ as.numeric(pbmc.B$day) ])
+
+# fix the order:
+pbmc.B$day_label <- factor(pbmc.B$day_label, levels = 
+                             levels(pbmc.B$day_label)[
+  order(as.numeric(
+    gsub(levels(pbmc.B$day_label), pattern = "d|\n.*$", replacement = "")))
+  ])
+
+######################
+## We need to plot the B cells again.
+## This is figure 5 C and D
+# Turner definitions
+gcb.markers <- c("BCL6", "RGS13", "MEF2B", "STMN1", "ELL3", "SERPINA9")
+
+b2 <- DimPlot(pbmc.B, reduction = "umap", group.by = "seurat_clusters")
+DefaultAssay(pbmc.B) <- "RNA"
+b3 <- DotPlot(pbmc.B, features = c( "TCL1A", "IL4R", "CCR7", "IGHM", "IGHD",
+                                   gcb.markers, 
+                                     "XBP1", "IRF4", "SEC11C", "FKBP11", "JCHAIN", "PRDM1", 
+                                   "TNFRSF13B", "CD24", "CD27", "TBX21", "FCRL5", "ITGAX", "NKG7", "ZEB2", "CR2")) + ggpubr::rotate_x_text()
+
+## This is a useful diagnostic plot, but not required for this figure:
+#cowplot::plot_grid(b2,b3, rel_widths = c(1,2))
+
+######################
+## LABEL B cell subsets:
+pbmc.B <- RenameIdents(pbmc.B, '0' = "mem resting", '1' = "*FCRL5*+ B mem", '2' = "naive", '3' = "plasma cell")
+pbmc.B$cell_type <- Idents(pbmc.B)
+
+######################
+## Get the paired GC barcodes:
+load("../Turner_dataset_reanalysis/R_results_objects/barcodes_for_IgD_neg_enriched_PBMCs_where_BCR_is_shared_with_d12_FNA_GC_B_cells.RData")
+## Some of these rows have >1 barcode associated with it, where BCRs are identical between GEMs.
+barcodes.d28 <- unlist(strsplit(filt.IgD.d28$Barcode, ";"))
+barcodes.d28 <- paste0(barcodes.d28, "_4") # the d28 sample barcodes are appended with '_4' By Seurat on import.
+summary(barcodes.d28 %in% rownames(pbmc.B@meta.data)) # 38 cells are found, AND are B cells; 1 cell is not (this cell presumably fails the QC at the start)
+
+# Make a factor in the metadata of the Seurat object.
+pbmc.B$GC_related_BCR <- factor("N", levels = c("Y", "N"))
+
+pbmc.B$GC_related_BCR[rownames(pbmc.B@meta.data) %in% barcodes.d28] <- "Y"
+
+######################
+# We want to plot just day 28
+pbmc.B.d28 <- subset(pbmc.B, day == "d28") 
+
+pbmc.B.d28$GC_related_BCR_label <- paste0(
+  levels(pbmc.B.d28$GC_related_BCR),"\n",summary(pbmc.B.d28$GC_related_BCR)," cells")[pbmc.B.d28$GC_related_BCR]
+
+######################
+# We want to plot just day 28pbm
+load("../Turner_dataset_reanalysis/Immcantation_db_SRRSRR11233635.RData")
+library(dplyr)
+library(ggpubr)
+library(tidyverse)
+
+# The metadata of the Seurat object has barcodes as its rownames:
+head(rownames(pbmc.B[[]]))
+# Handy to remove the trailing "_N", as this is not attached to the immcantation barcodes.
+pbmc.B.d28$cell_id <- gsub(rownames(pbmc.B.d28[[]]), pattern = "_.*", replacement = "")
+
+# the cell barcodes are in the immcantation db (change-o database format, airr based):
+head(db_obs$cell_id)
+
+summary(factor(db_obs$locus)) # 6987 cells with a rearranged IgH in IgD- PBMC day 28 sample.
+dim(pbmc.B.d28) # 7378 B cells, transcriptionally in this sample.
+
+# of 6987 IgHs, 6812 are in cells that are called B cells from transcriptome:
+summary(db_obs$cell_id %in% pbmc.B.d28$cell_id)
+# of 7378 B cells, 6812 have IgH-BCRs (that pass QC), 566 do not.
+summary(pbmc.B.d28$cell_id %in% db_obs$cell_id)
+
+# We need an inner join:
+combined <- inner_join(db_obs, pbmc.B.d28[[]], by = "cell_id")
+
+
+###############################
+# plots - preamble
+
+symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns")) #
+## to annotate the number of cells / boxplot:
+annot <- reshape2::melt(table(combined$GC_related_BCR, combined$cell_type))
+annot <- annot[order(as.character(annot$Var2), as.character(annot$Var1)),  ]
+##############################
+# plots - proper
+# CDRs + FWRs together
+# Number of mutations
+panelF <- combined %>%
+  mutate("CDR_muts" = mu_count_cdr1_r + mu_count_cdr1_s + mu_count_cdr2_r + mu_count_cdr2_s) %>%
+  mutate(
+    "FR_muts" = 
+      mu_count_fwr1_r + mu_count_fwr1_s + mu_count_fwr2_r + mu_count_fwr2_s + mu_count_fwr3_r + mu_count_fwr3_s) %>%
+  select(cell_id, cell_type, GC_related_BCR, contains("_muts")) %>%
+  pivot_longer(!c(cell_id, cell_type, GC_related_BCR), names_to = "region", values_to = "number") %>%
+  mutate("region" = gsub(.$region, pattern = "_muts", replacement = "")) %>%
+  mutate("x_axis" = factor(paste(cell_type, GC_related_BCR))) %>%
+  ggpubr::ggboxplot(x = "x_axis",
+                    y = "number", facet.by = c("region"),
+                    fill = "x_axis",
+                    #color = "GC_related_BCR",
+                    ylab = "# of mutations", ylim = c(-25, 100),
+                    xlab = "cell type ± GC derived BCR",
+                    palette = RColorBrewer::brewer.pal(8, "Paired"),
+                    legend = "none"
+  ) +
+  ggpubr::rotate_x_text() + 
+  stat_compare_means(method = "wilcox", paired = F,
+                     comparisons = list(c(1,5), c(2,5), c(3,5), c(4, 5), c(5,7)),
+                     symnum.args = symnum.args,
+                     step.increase = c(0.1)) +
+  
+  annotate(geom = "text", x = 1, y = -15, angle = 90, label = annot$value[1]) +
+  annotate(geom = "text", x = 2, y = -15, angle = 90, label = annot$value[2]) +
+  annotate(geom = "text", x = 3, y = -15, angle = 90, label = annot$value[3]) +
+  annotate(geom = "text", x = 4, y = -15, angle = 90, label = annot$value[4]) +
+  annotate(geom = "text", x = 5, y = -15, angle = 90, label = annot$value[5]) +
+  annotate(geom = "text", x = 6, y = -15, angle = 90, label = annot$value[6]) +
+  annotate(geom = "text", x = 7, y = -15, angle = 90, label = annot$value[7]) +
+  annotate(geom = "text", x = 8, y = -15, angle = 90, label = annot$value[8]) +
+  theme(strip.background = element_rect(fill = NA))
+
+
+
+##
+# Fix combined$cell_types.
+##
+
+# CDRs + FWRs together
+# R/(S+0.01)
+panelG <- combined %>%
+  mutate("CDR_ratio" = (mu_count_cdr1_r + mu_count_cdr2_r) / (mu_count_cdr1_s+mu_count_cdr2_s+0.01)) %>%
+  mutate("FR_ratio" = 
+           (mu_count_fwr1_r + mu_count_fwr2_r + mu_count_fwr3_r) / 
+           (mu_count_fwr1_s+mu_count_fwr2_s+mu_count_fwr3_s+0.01)) %>%
+  select(cell_id, cell_type, GC_related_BCR, contains("ratio")) %>%
+  pivot_longer(!c(cell_id, cell_type, GC_related_BCR), names_to = "region", values_to = "RS") %>%
+  mutate("region" = gsub(.$region, pattern = "_ratio", replacement = "")) %>%
+  mutate("x_axis" = factor(paste(cell_type, GC_related_BCR))) %>%
+  #  group_by(x_axis) %>%
+  #  summarise(med = median(RS, na.rm = T))
+  ggpubr::ggboxplot(x = "x_axis",
+                    y = "RS", facet.by = c("region"),
+                    fill = "x_axis",
+                    #color = "GC_related_BCR",
+                    ylab = "Pseudolog R/S ratio", ylim = c(-25, 500000),
+                    xlab = "cell type ± GC derived BCR",
+                    palette = RColorBrewer::brewer.pal(8, "Paired"),
+                    legend = "none"
+  ) +
+  ggpubr::rotate_x_text() + 
+  stat_compare_means(method = "wilcox", paired = F,
+                     comparisons = list(c(1,5), c(2,5), c(3,5), c(4, 5), c(5,7)),
+                     symnum.args = symnum.args,
+                     step.increase = c(0.1)) + 
+  scale_y_continuous(trans = "pseudo_log", breaks = c(0, 10, 100, 1000, 10000)) + 
+  # annotation_logticks(sides = "l", outside = TRUE) +
+  # coord_cartesian(clip = "off") + 
+  
+  annotate(geom = "text", x = 1, y = -7.5, angle =90, label = annot$value[1]) +
+  annotate(geom = "text", x = 2, y = -7.5, angle =90, label = annot$value[2]) +
+  annotate(geom = "text", x = 3, y = -7.5, angle =90, label = annot$value[3]) +
+  annotate(geom = "text", x = 4, y = -7.5, angle =90, label = annot$value[4]) +
+  annotate(geom = "text", x = 5, y = -7.5, angle =90, label = annot$value[5]) +
+  annotate(geom = "text", x = 6, y = -7.5, angle =90, label = annot$value[6]) +
+  annotate(geom = "text", x = 7, y = -7.5, angle =90, label = annot$value[7]) +
+  annotate(geom = "text", x = 8, y = -7.5, angle =90, label = annot$value[8]) +
+  theme(panel.spacing = unit(1, "lines"),strip.background = element_rect(fill = NA)) +
+  theme(axis.text.y.left = element_text(margin = margin(t = 0, r = 8, b = 0, l = 0)))
+
+
+```
+
+
+```{r plots}
+
+plot_grid(
+
+  plot_grid(
+    ## ROW !:
+  panelA + xlab("UMAP 1") + ylab("\nUMAP 2") +
+      theme(aspect.ratio = 1,
+            axis.ticks = element_blank(), 
+            axis.text = element_blank(),
+            legend.key.size = unit(0, 'lines'),
+            legend.margin = margin(0,0,0,0, 'lines')), 
+  
+  panelB + theme_pubr(legend = "right") +
+      xlab("Gene") + 
+    ylab("\nFNA cluster") + 
+      rotate_x_text() + 
+      theme(legend.key.width = unit(12,"points"),
+            legend.key.height = unit(12,"points"),
+            legend.margin = margin(0,0,0,0, 'lines'),
+            legend.justification = "bottom",
+            axis.text.x = element_text(face = "italic", size = 10)) + 
+      guides(size = guide_legend(title = "% of cells expressing"),
+             colour = guide_colorbar(title = "Scaled expression", 
+                                     direction = "horizontal",
+                                     title.position = "top")),
+  labels = LETTERS[1:2],
+  ncol = 2,
+  rel_widths = c(1,2)),
+  
+   ## ROW 2:
+  plot_grid(
+      panelC + theme_pubr(legend = "right") +
+      xlab("Gene") + 
+    ylab("\nFNA B cluster") + 
+      rotate_x_text() + 
+      theme(legend.key.width = unit(12,"points"),
+            legend.key.height = unit(12,"points"),
+            legend.margin = margin(0,0,0,0, 'lines'),
+            legend.justification = "bottom",
+            axis.text.x = element_text(face = "italic", size = 10)) + 
+      guides(size = guide_legend(title = "% of cells expressing"),
+             colour = guide_colorbar(title = "Scaled expression", 
+                                     direction = "horizontal",
+                                     title.position = "top")),
+    labels = LETTERS[3],
+    ncol = 1),
+  
+  plot_grid(
+    ## ROW 3:
+    panelD + xlab("UMAP 1") + ylab("\nUMAP 2") +
+      theme(aspect.ratio = 1,
+            axis.ticks = element_blank(), 
+            axis.text = element_blank(),
+            legend.key.size = unit(0, 'lines'),
+            legend.margin = margin(0,0,0,0, 'lines')), 
+    
+  panelE + theme_pubr(legend = "right") +
+      xlab("Gene") + 
+    ylab("\nIgD- PBMC cluster") + 
+      rotate_x_text() + 
+      theme(legend.key.width = unit(12,"points"),
+            legend.key.height = unit(12,"points"),
+            legend.margin = margin(0,0,0,0, 'lines'),
+            legend.justification = "bottom",
+            axis.text.x = element_text(face = "italic", size = 10)) + 
+      guides(size = guide_legend(title = "% of cells expressing"),
+             colour = guide_colorbar(title = "Scaled expression", 
+                                     direction = "horizontal",
+                                     title.position = "top")),
+  
+  labels = LETTERS[4:5],
+  ncol = 2,
+  rel_widths = c(1,2)),
+  
+  ## Last row:
+  plot_grid(
+  panelF + theme(axis.text.x = ggtext::element_markdown()),
+  panelG + theme(axis.text.x = ggtext::element_markdown()),
+  labels = LETTERS[6:7],
+  ncol = 2,
+  rel_widths = c(1,1)),
+
+
+# We need to assemble so the first nested plot_grid is twice the height.
+ncol = 1, rel_heights = c(1.5,1,1,1.75))
+
+
+```
+
+\newpage
+__Supplementary figure 4: Defining B cells within fine needle aspirations and B memory enriched PBMC samples, and somatic hypermutation rates of B cell subsets__
+
+(A) UMAP of all lymph node fine needle aspiration cells (n=`r fna.number`), with Louvain clusters shown.
+(B) Identification of B cell clusters in (A), based on the expression of _CD19_, _MS4A1_ and _CD79A_. Other key lineage markers, as used in Turner et al. (9), are shown: T cells _CD3D_, _CD3E_, _CD3G_, _IL7R_, _CD4_, _CD8A_; NK cells _GZMB_, _GNLY_, _NCAM1_; monocytes _CD14_, _LYZ_, _CST_, _MS4A7_; plasmacytoid dendritic cells _IL3RA_, _CLEC4C_ and platelets _PPBP_.
+(C) Identification of the fine needle aspirate B cell sub-clusters in Figure 5A, based on the expression of markers as used in Turner _et al._: naïve B cells TCL1A, IL4R, CCR7, IGHM, IGHD; germinal center B cells BCL6, RGS13, MEF2B, STMN1, ELL3, SERPINA9; plasma cells XBP1, IRF4, SEC11C, FKBP11, JCHAIN, PRDM1; 
+resting memory B cells (mem rest) TNFRSF13B, CD27 and CD24; activated B cells TBX21, FCRL5, ITGAX, NKG7, ZEB2, and the lack of CR2.
+(D) UMAP of all Bmem enriched (IgD-) PBMC (n=`r pbmc.number` cells), with Louvain clusters shown.
+(E) Annotation of B cell subsets in (C), based on the expression of marker genes as in (B).
+(F) The number of mutations in the CDR or FR regions of B cell receptors for each B cell subset, from circulating B cells at day 28 that share a BCR (Y) with the day 12 germinal center and those that do not (N). The number of cells in each category is shown just above the horizontal axis.
+(G) The replacement:silent ratios for the CDR or FR regions of B cell receptors for each B cell subset, from circulating B cells at day 28 that share a BCR (Y) with the day 12 germinal center and those that do not (N). The number of cells in each category is shown just above the horizontal axis. As in Figure 4, the replacement:silent ratio is calculated as # of replacement mutations / (# of silent mutations + 0.01), to avoid discarding cells with zero silent mutations. The resulting R/S ratio is plotted as a pseudolog. P values from two-tailed Mann-Whitney tests, comparing the indicated cluster against naïve cells, are represented: _P_<0.0001, \*\*\*\*; _P_<0.001, \*\*\*; _P_<0.01, \*\*; _P_<0.05, \*; _P_>0.05, ns).
+In (C), (D) and (E), the size of the dot represents the percentage of cells within the corresponding cluster expressing the given gene and the color of the dot reflects its scaled normalized expression.
+
+\newpage
+
+# SessionInfo
+
+```{r sessionInfo, results="markup"}
+
+sessionInfo()
+
+```

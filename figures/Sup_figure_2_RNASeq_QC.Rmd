@@ -2,7 +2,9 @@
 title: ""
 author: ""
 date: ""
-output: pdf_document
+output:
+  pdf_document:
+    keep_tex: no
 header-includes:
     - \pagenumbering{gobble}
 editor_options: 
@@ -213,7 +215,7 @@ cowplot::plot_grid(
   plotUMAP(sce, colour_by="clusters", add_legend = F) +  
     theme_pubr() +
     guides(fill = guide_legend(title = "Louvain\ncluster",
-                               title.position = "top")) +
+                               title.position = "top",ncol=2)) +
     xlab("UMAP1") + ylab("UMAP2") +
     theme(axis.ticks = element_blank(),
           axis.text = element_blank(),

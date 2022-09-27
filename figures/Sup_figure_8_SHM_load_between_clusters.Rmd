@@ -1,0 +1,847 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document:
+    keep_tex: no
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=F}
+Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r load_data, warning=FALSE, message=FALSE, results='hide'}
+
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+load(file = "../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+
+
+tableau10medium <- c("#729ECE", "#FF9E4A", "#67BF5C", "#ED665D",
+                               "#AD8BC9", "#A8786E", "#ED97CA", "#A2A2A2",
+                               "#CDCC5D", "#6DCCDA")
+
+library(dplyr)
+library(MultiAssayExperiment)
+
+source("../scripts/BCRtools.R") # script to import VDJPuzzle results.
+VDJ.chain.results <- VDJPuzzleimporter()
+
+```
+
+```{r merge_list_of_3_VDJ_chains_into_single_df, warning=FALSE, message=FALSE, results='hide'}
+
+library(stringr)
+
+VDJ.bcr <- VDJ.chain.results %>%
+  # Join all 3 together:
+  plyr::join_all(by="label") %>%
+  setNames(make.names(names(.), unique = TRUE)) %>%
+  # Select just the first segment that is called for each cell.
+  # AND select just the V family rather than alleles (eg IGHV-69, rather than 69*01)
+  mutate(bcr = paste(gsub(v_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(d_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(j_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(v_call.1,pattern = "\\*.*$", replacement = ""),
+                     gsub(j_call.1,pattern = "\\*.*$", replacement = ""),
+                     gsub(v_call.2,pattern = "\\*.*$", replacement = ""),
+                     gsub(j_call.2,pattern = "\\*.*$", replacement = ""), sep = "_")) %>%
+  # Remove NAs:
+  mutate(bcr = gsub(bcr, pattern = "NA|N/A", replacement = "")) %>%
+  # Remove duplicate underscores and trailing underscores:
+  mutate(bcr = gsub(bcr, pattern = "__|_$", replacement = "")) %>%
+  # A full BCR structure would contain the string "IG" 5 times:
+  mutate(bcr = ifelse(str_count(bcr, pattern = "IG") ==5, bcr, NA)) %>%
+  
+  # As above, but for igh only
+  mutate(igh = paste(gsub(v_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(d_call,pattern = "\\*.*$", replacement = ""),
+                     gsub(j_call,pattern = "\\*.*$", replacement = ""), sep = "_")) %>%
+  # Remove NAs:
+  mutate(igh = gsub(igh, pattern = "NA|N/A", replacement = "")) %>%
+  # Remove duplicate underscores and trailing underscores:
+  mutate(igh = gsub(igh, pattern = "__|_$", replacement = "")) %>%
+  # A full igh structure would contain the string "IG" 3 times:
+  mutate(igh = ifelse(str_count(igh, pattern = "IG") ==3, igh, NA))
+
+
+
+VDJ.bcr$label <- gsub(VDJ.bcr$label, pattern = "_", replacement = "\\.") # change the '_' in label to '.'
+
+```
+
+```{r add_vdjpuzzle_to_sce, warning=FALSE, message=FALSE, results='hide'}
+
+### Now need to add these data to our SCE ###
+# There are 18 samples that get a IGH but fail QC/PB contaminant
+summary(VDJ.bcr$label %in% gsub(sce$short.name, pattern = ".L001.*$", replacement = ""))
+
+# Subset the VDJ matrix to those cells that have QC pass expression data:
+VDJ.bcr <- VDJ.bcr[VDJ.bcr$label %in% gsub(sce$short.name, pattern = ".L001.*$", replacement = ""), ]
+
+# Make the expression of the heavy chain numeric, and a log2 version:
+VDJ.bcr$Expression <- as.numeric(VDJ.bcr$Expression)
+VDJ.bcr$Log.Expression <- log2(VDJ.bcr$Expression)
+
+# Extract coldat from SCE
+coldat <- data.frame(colData(sce))
+
+# Make an appropriate column to merge with:
+coldat$shorter.name <- gsub(coldat$short.name, pattern = ".L001.*$", replacement = "")
+
+# Do the merge:
+coldat <- dplyr::left_join(coldat, VDJ.bcr, by = c("shorter.name" = "label"))
+
+# Fix rownames:
+rownames(coldat) <- coldat$short.name
+
+# Check that sample order has been preserved (should be TRUE).
+all(rownames(coldat) == colnames(sce))
+
+# Replace colData with the added BCR info.
+colData(sce) <- DataFrame(coldat)
+
+```
+
+```{r are_clones_shared_d0_and_d42, warning=FALSE, message=FALSE, results='hide'}
+
+bcr.counts.per.individual.per.day <- coldat %>% 
+  mutate(bcr = factor(bcr)) %>%
+  group_by(PID, age, bcr, day) %>%
+  dplyr::summarise(n = n())
+
+
+bcr.counts.per.individual.per.day <- reshape2::dcast(bcr.counts.per.individual.per.day, PID+age+bcr ~ day, value.var = "n")
+
+# Select BCRs with:
+# > 1 count at day 0
+# > 1 count at day 42
+# Where the BCR is not 'NA'.
+# Calling a BCR identical if IGHV, D, J and light chain V and J are identical.
+
+bcr.counts.per.individual.per.day %>%
+  filter(d0 >= 1) %>%
+  filter(d42 >= 1) %>%
+  filter(bcr != "NA")
+
+# this gives 4 older and 4 younger individuals with shared clones day 0 and day 42.
+
+### Using definition of a clone as a shared IgH V-D-J call:
+
+igh.counts.per.individual.per.day <- coldat %>% 
+  mutate(igh = factor(igh)) %>%
+  group_by(PID, age, igh, day) %>%
+  dplyr::summarise(n = n())
+
+
+igh.counts.per.individual.per.day <- reshape2::dcast(igh.counts.per.individual.per.day, PID+age+igh ~ day, value.var = "n")
+
+igh.counts.per.individual.per.day %>%
+  dplyr::filter(d0 >= 1) %>%
+  dplyr::filter(d42 >= 1) %>%
+  dplyr::filter(igh != "NA")
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+VDJmutations.out <- list.files(path = "~/nf_bcr_output/VDJPuzzle/", pattern = ".mut$", full.names = T, recursive = T)
+
+VDJmutations.out <- VDJmutations.out[! grepl(VDJmutations.out, pattern = "NoCode|NoIndex")]
+
+VDJmutations <- lapply(VDJmutations.out, function(x){
+  read_tsv(x, col_types = cols(.default = "c"))
+  })
+
+names(VDJmutations) <- gsub(basename(VDJmutations.out), pattern = ".mut", replacement = "")
+
+VDJmutations2 <- bind_rows(VDJmutations, .id = "label")
+
+# # Add alakazam AA annotation
+# VDJmutations2 <- VDJmutations2 %>%
+#   mutate(frmAAbulk = alakazam::bulk(VDJmutations2$frmAA)) %>%
+#   mutate(frmAAcharge = alakazam::charge(VDJmutations2$frmAA)) %>%
+#   mutate(frmAApolar = alakazam::polar(VDJmutations2$frmAA)) %>%
+#   mutate(toAAbulk = alakazam::bulk(VDJmutations2$toAA)) %>%
+#   mutate(toAAcharge = alakazam::charge(VDJmutations2$toAA)) %>%
+#   mutate(toAApolar = alakazam::polar(VDJmutations2$toAA))
+
+# Because of the way nextflow gives each cell / bam its own vdjpuzzle call, the provided 'clone' and 'sample' columns are useless.
+all(VDJmutations2$id == VDJmutations2$clone)
+all(VDJmutations2$id == VDJmutations2$sample)
+
+
+num.of.igh.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_mutations = n())
+
+num.of.igh.R.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_R_mutations = n())
+
+num.of.igh.S.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "silent"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_S_mutations = n())
+
+num.of.igh.cdr3.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$region, pattern = "cdr3"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr3_mutations = n())
+
+
+num.of.igh.R.cdr3.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr3"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr3_R_mutations = n())
+
+
+num.of.igh.cdr2.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$region, pattern = "cdr2"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr2_mutations = n())
+
+
+num.of.igh.R.cdr2.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr2"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr2_R_mutations = n())
+
+
+num.of.igh.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr1_mutations = n())
+
+num.of.igh.R.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr1_R_mutations = n())
+
+num.of.igh.S.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "silent"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr1_S_mutations = n())
+
+num.of.igh.cdr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$region, pattern = "cdr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr_mutations = n())
+
+num.of.igh.R.cdr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_cdr_R_mutations = n())
+
+num.of.igh.fr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$region, pattern = "fr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_fr_mutations = n())
+
+num.of.igh.R.fr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGH"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "fr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_fr_R_mutations = n())
+
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations , num.of.igh.S.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations , num.of.igh.R.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.cdr3.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.R.cdr3.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.cdr2.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.R.cdr2.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.cdr1.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.R.cdr1.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.S.cdr1.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.cdr.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.R.cdr.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.fr.mutations, by = "label")
+num.of.igh.mutations <- dplyr::left_join(num.of.igh.mutations ,num.of.igh.R.fr.mutations, by = "label")
+
+## There are a number of NAs.
+apply(num.of.igh.mutations, MARGIN = 2, FUN = function(x) sum(is.na(x)) )
+# These NAs mean undetected.
+# So are best coded as zeros 0.
+num.of.igh.mutations <- num.of.igh.mutations %>% replace(is.na(.), 0)
+
+## Merge mutations:
+# Fix labels first:
+sce$shorter.name2 <- gsub(sce$shorter.name, pattern = "\\.", replacement = "_")
+num.of.igh.mutations$label <- gsub(num.of.igh.mutations$label, pattern = "IGH_|_L001", replacement = "")
+
+summary(num.of.igh.mutations$label %in% sce$shorter.name2)
+
+# Extract coldat from SCE
+coldat <- data.frame(colData(sce))
+
+# Do the merge:
+coldat <- dplyr::left_join(coldat, num.of.igh.mutations, by = c("shorter.name2" = "label"))
+
+# Fix rownames:
+rownames(coldat) <- coldat$short.name
+
+# Check that sample order has been preserved (should be TRUE).
+all(rownames(coldat) == colnames(sce))
+
+# Replace colData with the added BCR info.
+colData(sce) <- DataFrame(coldat)
+
+## Write out the coldat info, as Dr Linterman keen to have a copy for exploratory plotting.
+#write.csv(x = coldat, file = "Flow_RNASeqQC_BCR_for_each_cell.csv")
+```
+
+```{r for_lambda_chain, warning=FALSE, message=FALSE, results='hide'}
+
+num.of.igl.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_mutations = n())
+
+num.of.igl.R.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_R_mutations = n())
+
+num.of.igl.cdr3.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$region, pattern = "cdr3"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr3_mutations = n())
+
+
+num.of.igl.R.cdr3.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr3"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr3_R_mutations = n())
+
+
+num.of.igl.cdr2.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$region, pattern = "cdr2"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr2_mutations = n())
+
+
+num.of.igl.R.cdr2.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr2"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr2_R_mutations = n())
+
+
+num.of.igl.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr1_mutations = n())
+
+num.of.igl.R.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr1_R_mutations = n())
+
+num.of.igl.S.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "silent"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr1_S_mutations = n())
+
+num.of.igl.cdr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$region, pattern = "cdr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr_mutations = n())
+
+num.of.igl.R.cdr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_cdr_R_mutations = n())
+
+num.of.igl.fr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$region, pattern = "fr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_fr_mutations = n())
+
+num.of.igl.R.fr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGL"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "fr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igl_fr_R_mutations = n())
+
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations , num.of.igl.R.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.cdr3.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.R.cdr3.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.cdr2.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.R.cdr2.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.cdr1.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.R.cdr1.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.S.cdr1.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.cdr.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.R.cdr.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.fr.mutations, by = "label")
+num.of.igl.mutations <- dplyr::left_join(num.of.igl.mutations ,num.of.igl.R.fr.mutations, by = "label")
+
+
+## There are a number of NAs.
+apply(num.of.igl.mutations, MARGIN = 2, FUN = function(x) sum(is.na(x)) )
+# These NAs mean undetected.
+# So are best coded as zeros 0.
+num.of.igl.mutations <- num.of.igl.mutations %>% replace(is.na(.), 0)
+                                         
+## Merge mutations:
+# Fix labels first:
+num.of.igl.mutations$label <- gsub(num.of.igl.mutations$label, pattern = "IGL_|_L001", replacement = "")
+
+summary(num.of.igl.mutations$label %in% sce$shorter.name2)
+
+# Extract coldat from SCE
+coldat <- data.frame(colData(sce))
+
+# Do the merge:
+coldat <- dplyr::left_join(coldat, num.of.igl.mutations, by = c("shorter.name2" = "label"))
+
+# Fix rownames:
+rownames(coldat) <- coldat$short.name
+
+# Check that sample order has been preserved (should be TRUE).
+all(rownames(coldat) == colnames(sce))
+
+# Replace colData with the added BCR info.
+colData(sce) <- DataFrame(coldat)
+
+```
+
+
+```{r for_kappa_chain, warning=FALSE, message=FALSE, results='hide'}
+
+num.of.igk.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_mutations = n())
+
+num.of.igk.R.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_R_mutations = n())
+
+num.of.igk.cdr3.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$region, pattern = "cdr3"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr3_mutations = n())
+
+
+num.of.igk.R.cdr3.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr3"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr3_R_mutations = n())
+
+
+num.of.igk.cdr2.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$region, pattern = "cdr2"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr2_mutations = n())
+
+
+num.of.igk.R.cdr2.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr2"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr2_R_mutations = n())
+
+
+num.of.igk.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr1_mutations = n())
+
+num.of.igk.R.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr1_R_mutations = n())
+
+num.of.igk.S.cdr1.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "silent"), ] %>%
+  .[grepl(.$region, pattern = "cdr1"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr1_S_mutations = n())
+
+num.of.igk.cdr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$region, pattern = "cdr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr_mutations = n())
+
+num.of.igk.R.cdr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "cdr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_cdr_R_mutations = n())
+
+num.of.igk.fr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$region, pattern = "fr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_fr_mutations = n())
+
+num.of.igk.R.fr.mutations <- VDJmutations2 %>% 
+  .[grepl(.$label, pattern = "IGK"), ] %>%
+  .[grepl(.$SorR, pattern = "replacement"), ] %>%
+  .[grepl(.$region, pattern = "fr"), ] %>%
+  group_by(label) %>%
+  dplyr::summarise(num_igk_fr_R_mutations = n())
+
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations , num.of.igk.R.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.cdr3.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.R.cdr3.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.cdr2.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.R.cdr2.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.cdr1.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.R.cdr1.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.S.cdr1.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.cdr.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.R.cdr.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.fr.mutations, by = "label")
+num.of.igk.mutations <- dplyr::left_join(num.of.igk.mutations ,num.of.igk.R.fr.mutations, by = "label")
+
+## There are a number of NAs.
+apply(num.of.igk.mutations, MARGIN = 2, FUN = function(x) sum(is.na(x)) )
+# These NAs mean undetected.
+# So are best coded as zeros 0.
+num.of.igk.mutations <- num.of.igk.mutations %>% replace(is.na(.), 0)
+                                         
+## Merge mutations:
+# Fix labels first:
+num.of.igk.mutations$label <- gsub(num.of.igk.mutations$label, pattern = "IGK_|_L001", replacement = "")
+
+summary(num.of.igk.mutations$label %in% sce$shorter.name2)
+
+# Extract coldat from SCE
+coldat <- data.frame(colData(sce))
+
+# Do the merge:
+coldat <- dplyr::left_join(coldat, num.of.igk.mutations, by = c("shorter.name2" = "label"))
+
+# Fix rownames:
+rownames(coldat) <- coldat$short.name
+
+# Check that sample order has been preserved (should be TRUE).
+all(rownames(coldat) == colnames(sce))
+
+# Replace colData with the added BCR info.
+colData(sce) <- DataFrame(coldat)
+
+```
+
+
+```{r make_a_df_for_plots, warning=FALSE, message=FALSE, results='hide'}
+muts <- data.frame(sce$age, sce$day, sce$PID, sce$clusters, sce$num_mutations, sce$num_S_mutations, sce$num_R_mutations, sce$num_cdr3_mutations, sce$num_cdr2_R_mutations,sce$num_cdr2_mutations, sce$num_cdr1_R_mutations, sce$num_cdr1_S_mutations, sce$num_cdr1_mutations,sce$num_cdr3_R_mutations, sce$num_fr_mutations, sce$num_fr_R_mutations, sce$num_cdr_mutations, sce$num_cdr_R_mutations, sce$hA.APC, sce$Log.Expression, sce$Expression, "v_family"=substr(sce$v_call, 1, 5), 
+                   sce$num_igl_mutations,
+                   sce$num_igl_R_mutations,
+                   sce$num_igl_cdr1_mutations,
+                  sce$num_igl_cdr1_R_mutations, 
+                  sce$num_igl_cdr1_S_mutations, 
+                  sce$num_igl_cdr3_mutations,
+                  sce$num_igl_cdr3_R_mutations,
+                  sce$num_igl_cdr2_mutations,
+                  sce$num_igl_cdr2_R_mutations,
+                  sce$num_igl_cdr_mutations,
+                  sce$num_igl_cdr_R_mutations,
+                  sce$num_igl_fr_mutations,
+                  sce$num_igl_fr_R_mutations,
+                  ##
+                  sce$num_igk_mutations,
+                  sce$num_igk_R_mutations,
+                  sce$num_igk_cdr1_mutations,
+                  sce$num_igk_cdr1_R_mutations, 
+                  sce$num_igk_cdr1_S_mutations, 
+                  sce$num_igk_cdr3_mutations,
+                  sce$num_igk_cdr3_R_mutations,
+                  sce$num_igk_cdr2_mutations,
+                  sce$num_igk_cdr2_R_mutations,
+                  sce$num_igk_cdr_mutations,
+                  sce$num_igk_cdr_R_mutations,
+                  sce$num_igk_fr_mutations,
+                  sce$num_igk_fr_R_mutations
+                  )
+
+colnames(muts) <- gsub(pattern = "sce.", replacement = "", colnames(muts))
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+
+# log2:
+sce$num_R_mutations_log <- log2(sce$num_R_mutations)
+sce$num_fr_R_mutations_log <- log2(sce$num_fr_R_mutations)
+
+sce$ratio <- log2(sce$num_mutations/sce$num_fr_mutations)
+
+
+# log 2:
+muts$log_num_cdr_mutations <- log2(muts$num_cdr_mutations)
+muts$log_num_fr_mutations <- log2(muts$num_fr_mutations)
+muts$log_num_cdr_R_mutations <- log2(muts$num_cdr_R_mutations)
+muts$log_num_fr_R_mutations <- log2(muts$num_fr_R_mutations)
+
+# ratios R/(S+R):
+muts$fr.ratio <- muts$num_fr_R_mutations / muts$num_fr_mutations
+muts$cdr.ratio <- muts$num_cdr_R_mutations / muts$num_cdr_mutations
+muts$cdr3.ratio <- muts$num_cdr3_R_mutations / muts$num_cdr3_mutations
+muts$cdr2.ratio <- muts$num_cdr2_R_mutations / muts$num_cdr2_mutations
+muts$cdr1.ratio <- muts$num_cdr1_R_mutations / muts$num_cdr1_mutations
+
+# igl ratios R/(S+R):
+muts$igl.fr.ratio <- muts$num_igl_fr_R_mutations / muts$num_igl_fr_mutations
+muts$igl.cdr.ratio <- muts$num_igl_cdr_R_mutations / muts$num_igl_cdr_mutations
+muts$igl.cdr3.ratio <- muts$num_igl_cdr3_R_mutations / muts$num_igl_cdr3_mutations
+muts$igl.cdr2.ratio <- muts$num_igl_cdr2_R_mutations / muts$num_igl_cdr2_mutations
+muts$igl.cdr1.ratio <- muts$num_igl_cdr1_R_mutations / muts$num_igl_cdr1_mutations
+
+# igk ratios R/(S+R):
+muts$igk.fr.ratio <- muts$num_igk_fr_R_mutations / muts$num_igk_fr_mutations
+muts$igk.cdr.ratio <- muts$num_igk_cdr_R_mutations / muts$num_igk_cdr_mutations
+muts$igk.cdr3.ratio <- muts$num_igk_cdr3_R_mutations / muts$num_igk_cdr3_mutations
+muts$igk.cdr2.ratio <- muts$num_igk_cdr2_R_mutations / muts$num_igk_cdr2_mutations
+muts$igk.cdr1.ratio <- muts$num_igk_cdr1_R_mutations / muts$num_igk_cdr1_mutations
+
+
+# calculate as (total - R)/R , as when silent mutations = 0, this is summarised as NA in dplyr above.
+muts$SR.ratio <-  (muts$num_cdr1_S_mutations)/ muts$num_cdr1_R_mutations 
+muts$cdr1.SR.ratio <-  (muts$num_cdr1_mutations-muts$num_cdr1_R_mutations)/ muts$num_cdr1_R_mutations 
+muts$cdr.SR.ratio <-  (muts$num_cdr_mutations-muts$num_cdr_R_mutations)/ muts$num_cdr_R_mutations 
+muts$fr.SR.ratio <- (muts$num_fr_mutations-muts$num_fr_R_mutations) / muts$num_fr_R_mutations
+
+
+# calculate as (total - R)/R , as when silent mutations = 0, this is summarised as NA in dplyr above.
+muts$igl.cdr1.SR.ratio <-  (muts$num_igl_cdr1_mutations-muts$num_igl_cdr1_R_mutations)/ muts$num_igl_cdr1_R_mutations 
+muts$igl.cdr.SR.ratio <-  (muts$num_igl_cdr_mutations-muts$num_igl_cdr_R_mutations)/ muts$num_igl_cdr_R_mutations 
+muts$igl.fr.SR.ratio <- (muts$num_igl_fr_mutations-muts$num_igl_fr_R_mutations) / muts$num_igl_fr_R_mutations
+
+
+# calculate as (total - R)/R , as when silent mutations = 0, this is summarised as NA in dplyr above.
+muts$igk.cdr1.SR.ratio <-  (muts$num_igk_cdr1_mutations-muts$num_igk_cdr1_R_mutations)/ muts$num_igk_cdr1_R_mutations 
+muts$igk.cdr.SR.ratio <-  (muts$num_igk_cdr_mutations-muts$num_igk_cdr_R_mutations)/ muts$num_igk_cdr_R_mutations 
+muts$igk.fr.SR.ratio <- (muts$num_igk_fr_mutations-muts$num_igk_fr_R_mutations) / muts$num_igk_fr_R_mutations
+
+
+###########
+## August 2020 - changed to R / (S + 0.01) 
+## There are many cells with no silent changes - all mutations are replacement. These give an infinite ratio, which is excluded from stats + plots.
+## therefore use a pseudocount.
+muts$RS.ratio <-  muts$num_cdr1_R_mutations / (muts$num_cdr1_S_mutations + 0.01)
+muts$cdr1.RS.ratio <- muts$num_cdr1_R_mutations / (muts$num_cdr1_mutations-muts$num_cdr1_R_mutations + 0.01) 
+muts$cdr2.RS.ratio <- muts$num_cdr2_R_mutations / (muts$num_cdr2_mutations-muts$num_cdr2_R_mutations + 0.01) 
+muts$cdr3.RS.ratio <- muts$num_cdr3_R_mutations / (muts$num_cdr3_mutations-muts$num_cdr3_R_mutations + 0.01) 
+muts$cdr.RS.ratio <-  muts$num_cdr_R_mutations / (muts$num_cdr_mutations-muts$num_cdr_R_mutations + 0.01)
+muts$fr.RS.ratio <-   muts$num_fr_R_mutations / (muts$num_fr_mutations-muts$num_fr_R_mutations + 0.01) 
+
+
+# calculate as changed to R / (total - R) , as when silent mutations = 0, this is summarised as NA in dplyr above.
+muts$igl.RS.ratio <-  muts$num_igl_R_mutations / (muts$num_igl_mutations-muts$num_igl_R_mutations + 0.01)
+muts$igl.cdr1.RS.ratio <-  muts$num_igl_cdr1_R_mutations / (muts$num_igl_cdr1_mutations-muts$num_igl_cdr1_R_mutations + 0.01)
+muts$igl.cdr.RS.ratio <-  muts$num_igl_cdr_R_mutations / (muts$num_igl_cdr_mutations-muts$num_igl_cdr_R_mutations + 0.01)
+muts$igl.fr.RS.ratio <- muts$num_igl_fr_R_mutations/ (muts$num_igl_fr_mutations-muts$num_igl_fr_R_mutations + 0.01)
+
+
+# calculate as changed to R / (total - R) , as when silent mutations = 0, this is summarised as NA in dplyr above.
+muts$igk.RS.ratio <-  muts$num_igk_R_mutations/ (muts$num_igk_mutations-muts$num_igk_R_mutations + 0.01)
+muts$igk.cdr1.RS.ratio <-  muts$num_igk_cdr1_R_mutations/ (muts$num_igk_cdr1_mutations-muts$num_igk_cdr1_R_mutations + 0.01)
+muts$igk.cdr.RS.ratio <-  muts$num_igk_cdr_R_mutations  / (muts$num_igk_cdr_mutations-muts$num_igk_cdr_R_mutations + 0.01)
+muts$igk.fr.RS.ratio <-  muts$num_igk_fr_R_mutations / (muts$num_igk_fr_mutations-muts$num_igk_fr_R_mutations + 0.01) 
+
+# Make a neater isotype.constant
+# Use the first 4 characters to group to IgG / IgM / IgA (rather than IgG3, IgG1 etc)
+sce$Isotype.Constant.group <- factor(substr(sce$Isotype.Constant, 1, 4))
+
+
+### Change muts age factor to appropriate plotting labels:
+ages <- paste(levels(ALFNA16$Age.Group), "yo")
+
+muts$age <- factor(ifelse(muts$age == "young", 
+                          # Yes:
+                          ages[1], 
+                          # No:
+                          ages[2]))
+
+
+```
+
+```{r}
+
+library(scater) # for plotUMAP.
+library(ggpubr)
+
+symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+
+ylim <- c(0,500)
+ylim.RS <- c(0, 12000)
+
+sce$junction_aa_length <- as.numeric(sce$junction_aa_length)
+
+
+
+
+  
+cowplot::plot_grid( # second chunk of figure. Need 2 columns:
+    
+  cowplot::plot_grid( # want both of these to be a single column: 
+   #### Number of IgH mutations by UMAP clusters and day / age FRAMEWORK ####
+                     ggstripchart(data = muts,
+                       x = "clusters", y = "num_fr_mutations", facet.by = c("day"), 
+                       col = "clusters",
+            palette = tableau10medium[1:5],
+            ylim = c(0,600),
+          xlab = "", ylab = "FR\n# mutations",
+            legend = "none",
+          panel.labs = list(clusters =c("*FCRL5*+<br>B mem","*MALAT1*+<br>B mem","*LY9*+<br>B mem","naive","*MARCKS*+<br>B mem"))) + 
+            geom_boxplot(outlier.shape = NA, fill = NA) + 
+            stat_compare_means(aes(label = paste0( ..p.adj..)), method ="wilcox",comparisons = list(c(1,2), c(1,3), c(1,4), c(1,5))) + 
+     scale_y_continuous() +
+            theme_pubr(legend = "none") + 
+            rotate_x_text() + 
+            theme(axis.text.x = element_blank(), strip.background = element_rect(fill = NA),
+                  strip.text = ggtext::element_markdown()),
+ 
+       ggstripchart(data = muts,
+                       x = "clusters", y = "fr.RS.ratio", facet.by = c("day"), 
+                       col = "clusters",
+            palette = tableau10medium[1:5],
+          xlab = "", ylab = "FR\nPseudolog R/S ratio",
+          ylim = c(0, 1000000),
+            legend = "none",
+          panel.labs = list(clusters =c("*FCRL5*+<br>B mem","*MALAT1*+<br>B mem","*LY9*+<br>B mem","naive","*MARCKS*+<br>B mem"))) + 
+            geom_boxplot(outlier.shape = NA, fill = NA) + 
+            stat_compare_means(aes(label = paste0( ..p.adj..)), comparisons = list(c(1,2), c(1,3), c(1,4), c(1,5))) +  
+            scale_y_continuous(trans = scales::pseudo_log_trans(), breaks = c(0, 10, 100, 1000, 10000, 100000)) +
+            theme_pubr(legend = "none") + 
+            rotate_x_text() + 
+            theme(strip.background = element_rect(fill = NA),
+                  strip.text = ggtext::element_markdown()),
+  labels = c("A", "B"),
+  rel_heights = c(1,1), # give the last plot a bit more height as it has age group labels
+  align = "v",
+  ncol = 1),
+  
+  #### 
+
+  cowplot::plot_grid( # want both of these to be a single column: 
+      #### Number of IgH mutations by UMAP clusters and day / age CDR ####
+                     ggstripchart(data = muts,
+                       x = "clusters", y = "num_cdr_mutations", facet.by = c("day"), 
+                       col = "clusters",
+            palette = tableau10medium[1:5],
+          xlab = "", ylab = "CDR\n# mutations",
+         
+                      ylim = c(0,400),
+            legend = "none",
+          panel.labs = list(clusters =c("*FCRL5*+<br>B mem","*MALAT1*+<br>B mem","*LY9*+<br>B mem","naive","*MARCKS*+<br>B mem"))) + 
+            geom_boxplot(outlier.shape = NA, fill = NA) + 
+            stat_compare_means(aes(label = paste0( ..p.adj..)), 
+                               method ="wilcox",
+                               comparisons = list(c(1,2),c(1,3), c(1,4), c(1,5))) + 
+            theme_pubr(legend = "none") + 
+            rotate_x_text() + 
+            theme(axis.text.x = element_blank(), 
+                  strip.background = element_rect(fill = NA),
+                  strip.text = ggtext::element_markdown()),
+      
+                    ggstripchart(data = muts,
+                       x = "clusters", y = "cdr.RS.ratio", facet.by = c("day"), 
+                       col = "clusters",
+            palette = tableau10medium[1:5],
+          xlab = "", ylab = "CDR\nPseudolog R/S ratio",
+          ylim = c(0, 1000000),
+            legend = "none",
+          panel.labs = list(clusters =c("*FCRL5*+<br>B mem","*MALAT1*+<br>B mem","*LY9*+<br>B mem","naive","*MARCKS*+<br>B mem"))) + 
+            geom_boxplot(outlier.shape = NA, fill = NA) + 
+            stat_compare_means(aes(label = paste0( ..p.adj..)),
+                               method = "wilcox",
+                               comparisons = list(c(1,2), c(1,3), c(1,4), c(1,5))) + 
+            scale_y_continuous(trans = scales::pseudo_log_trans(), breaks = c(0, 10, 100, 1000, 10000, 100000)) +
+            theme_pubr(legend = "none") + 
+            rotate_x_text() + 
+            theme(strip.background = element_rect(fill = NA),
+                  strip.text = ggtext::element_markdown()),
+
+          labels = c("C", "D"),
+          rel_heights = c(1,1), # give the last plot a bit more height as it has age group labels
+      align = "v",
+ ncol = 1),
+ 
+ ncol = 2)
+
+
+
+```
+
+\newpage
+
+__Supplementary Figure 8 – Somatic hypermutation is reduced in haemagglutinin specific memory B cells from aged individuals after TIV immunisation__
+
+
+\newpage
+
+
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```
+

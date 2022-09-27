@@ -1,0 +1,250 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document:
+    keep_tex: no
+header-includes:
+    - \pagenumbering{gobble}
+editor_options: 
+  chunk_output_type: console
+---
+
+IMPORTANT: This requires R>4.0.0. Run with R=4.0.4. (all other code is developed in 3.6.1).
+
+
+```{r echo=F}
+# Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+#                       "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+
+```
+
+```{r setup, include=FALSE}
+
+## set a few options for pdf formatting.
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9, tidy.opts=list(width.cutoff=60))
+```
+
+
+```{r load_data, warning=FALSE, message=FALSE, results='hide'}
+
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+load(file = "../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+
+
+tableau10medium <- c("#729ECE", "#FF9E4A", "#67BF5C", "#ED665D",
+                               "#AD8BC9", "#A8786E", "#ED97CA", "#A2A2A2",
+                               "#CDCC5D", "#6DCCDA")
+
+library(dplyr)
+library(MultiAssayExperiment)
+library(SingleCellExperiment)
+
+```
+
+```{r warning=FALSE, message=FALSE, eval=FALSE}
+
+devtools::install_github("MarioniLab/miloR", ref="devel") 
+
+
+```
+
+
+```{r}
+library(miloR)
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+sce$sample <- paste(sce$PID, sce$day)
+
+set.seed(42)
+
+sce_milo <- Milo(sce)
+sce_milo
+
+sce_milo <- buildGraph(sce_milo, k = 15, d = 40, reduced.dim = "PCA")
+
+sce_milo <- makeNhoods(sce_milo, prop = 0.10, k = 15, d=40, refined = TRUE, reduced_dims = "PCA")
+
+plotNhoodSizeHist(sce_milo)
+
+sce_milo <- countCells(sce_milo, meta.data = as.data.frame(colData(sce_milo)), sample="sample")
+
+head(nhoodCounts(sce_milo))
+
+design <- data.frame(colData(sce_milo))[,c("phenotype", "PID","age", "day", "sample")]
+design <- dplyr::distinct(design)
+
+## Convert batch info from integer to factor
+rownames(design) <- design$sample
+head(design)
+
+
+sce_milo <- calcNhoodDistance(sce_milo, d=40, reduced.dim = "PCA")
+
+
+da_results <- testNhoods(sce_milo, design = ~ day, design.df = design)
+
+da_results
+
+library(dplyr)
+da_results %>%
+  arrange(SpatialFDR) %>%
+  head() 
+
+library(ggplot2)
+ggplot(da_results, aes(PValue)) + geom_density()
+
+ggplot(da_results, aes(logFC, -log10(SpatialFDR))) + 
+  geom_point() +
+  geom_hline(yintercept = 1)
+
+
+sce_milo <- buildNhoodGraph(sce_milo)
+all.NH <- plotNhoodGraphDA(sce_milo, da_results, layout="UMAP",alpha=0.10) 
+
+da_results <- annotateNhoods(sce_milo, da_results, coldata_col = "clusters")
+bees <- plotDAbeeswarm(da_results, group.by = "clusters")
+
+all.umap <- scater::plotReducedDim(sce_milo, dimred = "UMAP", colour_by = "clusters")
+
+```
+
+
+
+
+```{r}
+library(miloR)
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+sce$sample <- paste(sce$PID, sce$day)
+
+set.seed(42)
+
+sce_milo <- Milo(sce[,sce$age == "old"])
+sce_milo
+
+sce_milo <- buildGraph(sce_milo, k = 15, d = 40, reduced.dim = "PCA")
+
+sce_milo <- makeNhoods(sce_milo, prop = 0.10, k = 15, d=40, refined = TRUE, reduced_dims = "PCA")
+
+plotNhoodSizeHist(sce_milo)
+
+sce_milo <- countCells(sce_milo, meta.data = as.data.frame(colData(sce_milo)), sample="sample")
+
+head(nhoodCounts(sce_milo))
+
+design <- data.frame(colData(sce_milo))[,c("phenotype", "PID","age", "day", "sample")]
+design <- dplyr::distinct(design)
+
+## Convert batch info from integer to factor
+rownames(design) <- design$sample
+head(design)
+
+
+sce_milo <- calcNhoodDistance(sce_milo, d=40, reduced.dim = "PCA")
+
+
+da_results <- testNhoods(sce_milo, design = ~ day, design.df = design)
+
+da_results
+
+library(dplyr)
+da_results %>%
+  arrange(SpatialFDR) %>%
+  head() 
+
+library(ggplot2)
+ggplot(da_results, aes(PValue)) + geom_density()
+
+ggplot(da_results, aes(logFC, -log10(SpatialFDR))) + 
+  geom_point() +
+  geom_hline(yintercept = 1)
+
+
+sce_milo <- buildNhoodGraph(sce_milo)
+old.NH <- plotNhoodGraphDA(sce_milo, da_results, layout="UMAP",alpha=0.10) 
+
+
+
+```
+
+
+```{r}
+library(miloR)
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
+
+sce$sample <- paste(sce$PID, sce$day)
+
+set.seed(42)
+
+sce_milo <- Milo(sce[,sce$age == "young"])
+sce_milo
+
+sce_milo <- buildGraph(sce_milo, k = 15, d = 40, reduced.dim = "PCA")
+
+sce_milo <- makeNhoods(sce_milo, prop = 0.10, k = 15, d=40, refined = TRUE, reduced_dims = "PCA")
+
+plotNhoodSizeHist(sce_milo)
+
+sce_milo <- countCells(sce_milo, meta.data = as.data.frame(colData(sce_milo)), sample="sample")
+
+head(nhoodCounts(sce_milo))
+
+design <- data.frame(colData(sce_milo))[,c("phenotype", "PID","age", "day", "sample")]
+design <- dplyr::distinct(design)
+
+## Convert batch info from integer to factor
+rownames(design) <- design$sample
+head(design)
+
+
+sce_milo <- calcNhoodDistance(sce_milo, d=40, reduced.dim = "PCA")
+
+
+da_results <- testNhoods(sce_milo, design = ~ day, design.df = design)
+
+da_results
+
+library(dplyr)
+da_results %>%
+  arrange(SpatialFDR) %>%
+  head() 
+
+library(ggplot2)
+ggplot(da_results, aes(PValue)) + geom_density()
+
+ggplot(da_results, aes(logFC, -log10(SpatialFDR))) + 
+  geom_point() +
+  geom_hline(yintercept = 1)
+
+
+sce_milo <- buildNhoodGraph(sce_milo)
+young.NH <- plotNhoodGraphDA(sce_milo, da_results, layout="UMAP",alpha=0.10) 
+
+
+
+```
+
+```{r}
+library(cowplot)
+plot_grid(all.umap+ theme(legend.position = "bottom", legend.direction = "vertical"), all.NH + theme(legend.position = "bottom", legend.direction = "vertical"), old.NH + theme(legend.position = "bottom", legend.direction = "vertical"), young.NH + theme(legend.position = "bottom", legend.direction = "vertical"), ncol = 2, labels = LETTERS[1:4])
+
+```
+
+\newpage
+__FCRL5+ neighborhoods are enriched at day 42 after trivalent influenza vaccination in younger, but not older, individuals__
+(A) UMAP as previously described Cluster 1 is referred to as FCRL5+
+(B) MiloR analysis of all cells (both ages) with neighborhoods that are enriched at day 42 compared to day 0 with spatial FDR<0.10, shaded according to their logFC. The MiloR analysis is projected in UMAP embedding, such that cells in (A) have the same position in (B).
+(C) As in (B), for only individuals aged 67-86yo (zero neighborhoods reach significance threshold).
+(D) As in (B) for individuals aged 22-36yo. 4 neighborhoods within the FCRL5+ cluster (cluster 1), and a single neighborhood containing CD38intermediate cells are significantly enriched at day 42. 
+
+
+# SessionInfo
+
+```{r sessionInfo}
+
+sessionInfo()
+
+```
+

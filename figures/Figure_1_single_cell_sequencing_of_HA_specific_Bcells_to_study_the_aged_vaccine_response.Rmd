@@ -1,25 +1,27 @@
----
+﻿---
 title: ""
 author: ""
 date: ""
 output: 
   pdf_document: 
+    latex_engine: lualatex
+papersize: a4
 header-includes:
     - \pagenumbering{gobble}
 editor_options: 
   chunk_output_type: console
 ---
 
-```{r echo=F}
-Sys.setenv(PATH=paste(Sys.getenv("PATH"),
-                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+```{r echo=F, eval=F}
+#Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+ #                     "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
 
 ```
 
 ```{r setup, include=FALSE}
 
 ## set a few options for pdf formatting.
-knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7, fig.height = 9.5, tidy.opts=list(width.cutoff=60))
+knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 7.5, fig.height = 11.5, tidy.opts=list(width.cutoff=60))
 ```
 
 ```{r load_data}
@@ -51,69 +53,36 @@ load(file = "../cohort_2016_17/Example_of_sc_sort_gating_from_665X_d42.RData")
 
 ```{r study_design_panel}
 
-left.cols <- stepped3(20)[c(9,12)]
-right.cols <- stepped3(20)[c(15)]
 
-study <- ggplot() + xlim(0,10) + ylim(-0.5, 10.5) + theme_pubr(base_size = 12) + 
-  
-  # Left-hand labels + backgrounds:
-  
-  annotate(geom= "rect",xmin = 0, ymax = 10.3, xmax = 3, ymin = 6.8, fill = left.cols[1]) + 
-  annotate(geom= "text", x = 1.5, y = 8.55, label = "Healthy\nvolunteers") +
-  
-  annotate(geom= "rect",xmin = 0, ymax = 6.6, xmax = 3, ymin = -0.2, fill = left.cols[2]) + 
-  annotate(geom= "text",x = 1.5, y = 5, label = 
-             paste0(
-  names(summary(ALFNA16$Age.Group)[1]),
-  "\nyears\nn=",
-  summary(ALFNA16$Age.Group)[[1]]
-  )) +
-  
-  annotate(geom= "text",x = 1.5, y = 1.5, label = 
-             paste0(
-  names(summary(ALFNA16$Age.Group)[2]),
-  "\nyears\nn=",
-  summary(ALFNA16$Age.Group)[[2]]
-  )) +
-  
-  # Right-hand labels + backgrounds:
-  annotate(geom= "rect",xmin = 6, ymax = 10.3, xmax = 10, ymin = 5.2,fill = right.cols[1]) + 
-  annotate(geom= "text",x = 8, y = 7.75, label = "HA inhibition\nassay") +
-  annotate(geom= "rect",xmin = 6, ymax = 5, xmax = 10, ymin = -0.2,fill = right.cols[1]) + 
-  annotate(geom= "text",x = 8, y = 2.6, label = "Index sorting\nHA-specific\nB cells\nday 0 & 42") +
-  
-  # Mid-section background:
-  annotate(geom= "rect",xmin = 3.2, ymax = 10.3, xmax = 5.8, ymin = -0.2, fill = stepped3(20)[20]) + 
-  
-  # time line
-    annotate(geom= "segment", x = 3.4, y = 6,xend = 5.5,yend = 6,size = 1.5, arrow = arrow(type = "closed",
-                                                                                 length = unit(6, "points"))) + 
-  #line + arrow for day 0 bleed
-    annotate(geom= "segment",x = 3.5,yend = 0.5,xend = 3.5, y= 6, size = 1) +
-    annotate(geom= "segment",x = 3.5-.055,yend = 0.5,xend = 5.5, y= 0.5, size = 1, arrow = arrow(length = unit(6, "points"))) +
-  annotate(geom= "text",x = 3.5, y = 7, label = "0", hjust = "center") +
-  
-  # line + arrow for day 7 bleed
-    annotate(geom= "segment",x = 3.75,yend = 1.5,xend = 3.75, y= 6, size = 1) +
-    annotate(geom= "segment",x = 3.75-.055,yend = 1.5,xend = 5.5, y= 1.5, size = 1, arrow = arrow(length = unit(6, "points"))) +
-  annotate(geom= "text",x = 4, y = 7, label = "7") +
-  
-  # line + arrow for day 42 bleed
-    annotate(geom= "segment",x = 5,yend = 5,xend = 5, y= 6, size = 1) +
-    annotate(geom= "segment",x = 5-.055,yend = 5,xend = 5.5, y= 5, size = 1, arrow = arrow(length = unit(6, "points"))) +
-  annotate(geom= "text",x = 5, y = 7, label = "42", hjust = "left") +
-  
-  # Syringe
-    annotate(geom= "segment",x=3.5,yend=10, xend= 3.5, y=8, size = 1) + 
-    annotate(geom= "segment",x=3.5 - 0.2 ,yend=10, xend= 3.5 +0.2, y=10, size = 1) + 
-  annotate(geom= "rect",xmin = 3.5 - 0.2, ymax = 10- 0.4, xmax = 3.5 + 0.2, ymin = 10 - (0.2 * 7), fill = "white", col = "black") + 
-  
-  # TIV
-  annotate(geom= "text",x = 4.25, y = 8.5, label = "TIV") +
-  
-  # hide all axes, their titles, ticks and labels:
-  theme(axis.line = element_blank(), axis.title = element_blank(), axis.ticks = element_blank(), axis.text = element_blank())
+study.layout <-
+  cbind("Assay"=c(
+    "Haemagglutinin\ninhibition assay",
+    "Haemagglutinin\ninhibition assay",
+    "Haemagglutinin\ninhibition assay",
+    "Haemagglutinin\nELISPOT",
+    "Index sorting of\nhaemagglutinin-\nspecific B cells",
+    "Index sorting of\nhaemagglutinin-\nspecific B cells"),
+    
+    "day"=as.numeric(c(0,7,14,7,0,14)))
 
+study.layout <- as.data.frame(study.layout)
+study.layout$day <- as.numeric(as.character(study.layout$day))
+study.layout$Assay <- factor(study.layout$Assay, 
+                             levels =c(
+                                       "Haemagglutinin\ninhibition assay",
+                                       "Haemagglutinin\nELISPOT",
+                                       "Index sorting of\nhaemagglutinin-\nspecific B cells", ""))
+
+study <- ggplot(study.layout, aes(x=day, y=Assay, col = Assay,fill=Assay)) + geom_point(shape=25, size=3) + 
+  scale_x_continuous(breaks=c(0,7,14), labels=c(0,7,42))+
+  theme_bw() + theme(legend.position = "none", 
+                     panel.grid = element_blank(), 
+                     panel.border = element_blank(), 
+                     text = element_text(size=12),
+                     axis.title.y = element_blank()) +
+  annotate(geom= "segment",x = 0,yend = 4.2,xend = 0, y= 4.5, size = 1, arrow = arrow(length = unit(6, "points"))) +
+  annotate(geom="text", x=1, y=4.35, label="Trivalent flu vaccine", hjust="left") +
+  labs(subtitle = "Healthy volunteers\n22-36 years old (n=10)\n67-86 years old (n=10)")
 
 ```
 
@@ -128,6 +97,9 @@ hai.data <- wideFormat(ALFNA16[ , ,
 
 
 hai.data <- as.data.frame(hai.data)
+
+hai.data <- hai.data %>% dplyr::filter(primary %in% sce$PID)
+
 ```
 
 
@@ -202,6 +174,104 @@ data.for.ggpaired1$expansion <- data.for.ggpaired1$d42/data.for.ggpaired1$d0
 ```
 
 
+
+```{r day7_PBs}
+
+load("../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+
+elispot <- wideFormat(ALFNA16[ , , 
+                                # select assays with names that match:
+                                # 'HAI'
+                                # which returns all data from these two assays at all available days.
+                                grepl(names(assays(ALFNA16)), pattern = "ELISPOT") ],
+                      # Return ages as well:
+                       colDataCols = "Age.Group")
+
+
+
+
+elispot$Age <- factor(c("22-36yo", "67-86yo")[elispot$Age.Group])
+
+elispot <- as.data.frame(elispot)
+# cowplot::plot_grid(
+# ggboxplot(elispot, x = "Age", y = "ELISPOT_d7_HA..per.1e6.PBMC",
+#           ylab = "HA ELISPOT day 7 per 10^6 PBMC") + stat_compare_means(method ="wilcox", paired=F, comparisons = list(c(1,2))),
+# ggboxplot(elispot, x = "Age", y = "ELISPOT_d7_Fluvax..per.1e6.PBMC",
+#           ylab = "Fluvax ELISPOT day 7 per 10^6 PBMC") + stat_compare_means(method ="wilcox", paired=F, comparisons = list(c(1,2))),
+# ncol = 2)
+
+
+elispot <- elispot %>% dplyr::filter(primary %in% sce$PID)
+
+```
+
+
+
+```{r flow validation}
+flowCytoDat.HA_PB <- openxlsx::read.xlsx(xlsxFile = "../cohort_2016_17/data/FlowValidation/Fig1_FlowCytoValidation.xlsx",
+                                   sheet = "HA_plasmablasts_of_Bcells")
+
+
+HAPBpanel <- flowCytoDat.HA_PB %>%
+  mutate(ID = paste(Group, ID)) %>%
+  pivot_longer(contains("day"),
+               names_to = "day",
+               values_to = "%") %>%
+ mutate(day = str_remove(day, "ay")) %>%
+  mutate(day = factor(day, levels = c("d0", "d7","d42"))) %>%
+  mutate(Group = case_when(Group=="Young"~ "22-36yo",
+                           Group=="Old"~"67-86yo", 
+                           is.na(Group)==TRUE ~"NA")) %>%
+  mutate(Group  = factor(Group, levels = c("22-36yo", "67-86yo"))) %>%
+  mutate(`%`= as.numeric(`%`)) %>%
+  ggplot(aes(x=Group, y=`%`,group=Group)) + 
+  geom_boxplot(aes(group=NULL, col = Group), outlier.shape = NA) + 
+  geom_point(aes(group=Group, fill=Group), shape=21,
+             size=2,position=position_jitter(width = 0.3)) +
+  scale_fill_manual(values = c("white", "darkgrey")) +
+  scale_color_manual(values = c("black", "black")) + 
+  facet_grid(.~day) + 
+  ggpubr::stat_compare_means(comparisons = list(c(1,2)),label.y = 0.03, method="wilcox") + 
+  labs(y="HA-specific\nplasmablasts [% of B cells]") + 
+  ggpubr::theme_pubr(legend = "none") +
+  theme(axis.title.x = element_blank(),strip.background = element_rect(fill = "NA")) + rotate_x_text()
+
+
+#----------#
+
+flowCytoDat.PB <- openxlsx::read.xlsx(xlsxFile = "../cohort_2016_17/data/FlowValidation/Fig1_FlowCytoValidation.xlsx",
+                                   sheet = "Plasmablasts_of_Bcells")
+
+
+  PBpanel <- flowCytoDat.PB %>%
+  mutate(ID = paste(Group, ID)) %>%
+  pivot_longer(contains("day"),
+               names_to = "day",
+               values_to = "%") %>%
+  mutate(day = str_remove(day, "ay")) %>%
+  mutate(day = factor(day, levels = c("d0", "d7","d42"))) %>%
+    mutate(Group = case_when(Group=="Young"~ "22-36yo",
+                           Group=="Old"~"67-86yo", 
+                           is.na(Group)==TRUE ~"NA")) %>%
+  mutate(Group  = factor(Group, levels = c("22-36yo", "67-86yo"))) %>%
+  mutate(`%`= as.numeric(`%`)) %>%
+  ggplot(aes(x=Group, y=`%`,group=Group)) + 
+  geom_boxplot(aes(group=NULL, col = Group), outlier.shape = NA) + 
+  geom_point(aes(group=Group, fill=Group), shape=21,
+             size=2,position=position_jitter(width = 0.3)) +
+  scale_fill_manual(values = c("white", "darkgrey")) +
+  scale_color_manual(values = c("black", "black")) + 
+  facet_grid(.~day) + 
+  ggpubr::stat_compare_means(comparisons = list(c(1,2)),label.y=4, method="wilcox") + 
+  labs(y="Plasmablasts\n[% of B cells]") + 
+  ggpubr::theme_pubr(legend = "none") +
+  theme(axis.title.x = element_blank(),strip.background = element_rect(fill = "NA")) + rotate_x_text()
+
+  
+ggsave(cowplot::plot_grid(HAPBpanel, PBpanel, ncol=2), file = "Aurora_PBs.svg", width=6, height=4,dpi=300)
+```
+
+
 ```{r plot_figure}
 
 symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1),
@@ -212,7 +282,8 @@ symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1),
 hai.p.values <- hai.data %>%
   dplyr::select(primary, Age.Group, 
                 -contains("HAI_d"), contains("log2")) %>%
-  mutate("Age" = factor(paste0(Age.Group, "\nyo"))) %>%
+  mutate(Age.Group=str_replace_all(Age.Group, c("young"="18-22yo", "old"="67-86yo"))) %>%
+               mutate("Age" = factor(paste0(Age.Group))) %>%
   dplyr::select(-Age.Group) %>%
   set_colnames(
     gsub(colnames(.), 
@@ -241,38 +312,52 @@ plot_grid(
     study,
     
     # HAI titres, faceted by age.
-    ggstripchart(data = 
-                 hai.data %>%
-                 dplyr::select(primary, Age.Group, 
-                               contains("HAI_d"), -contains("log2")) %>%
-                 mutate("Age" = factor(paste0(Age.Group, "\nyo"))) %>%
-                 dplyr::select(-Age.Group) %>%
-                 set_colnames(
-                   gsub(colnames(.), 
-                        pattern = "HAI_d|_titre", replacement = "")) %>%
-                 reshape2::melt( id_vars = c(primary, Age)),
-               x = "variable", y="value",
-               xlab = "day",
-               shape = 21, fill = "Age", palette = c("white", "darkgrey"),
-               facet.by = "Age", ncol = 2,
-               add = "violin",
-               add.params = list(color = "grey", fill = NA),
-               legend = "none",
-               ylab = "A/Cal09 HAI titer")  +
- stat_pvalue_manual(hai.p.values, label = "p.signif", step.increase = c(0.1)) +
-            scale_y_continuous(trans = "log2", limits = c(1, 10000)) +
-      theme_pubr(legend = "none") +
-      theme(strip.background = element_rect(fill = "NA")),
+    # HAI titres, faceted by age.
+ggplot(data = 
+               hai.data %>%
+               dplyr::select(primary, Age.Group, 
+                             contains("HAI_d"), -contains("log2")) %>%
+         mutate(Age.Group=str_replace_all(Age.Group, c("young"="18-22yo", "old"="67-86yo"))) %>%
+               mutate("Age" = factor(paste0(Age.Group))) %>%
+               dplyr::select(-Age.Group) %>%
+               set_colnames(
+                 gsub(colnames(.), 
+                      pattern = "HAI_d|_titre", replacement = "")) %>%
+               reshape2::melt( id_vars = c(primary, Age)),
+       aes(x = variable, y=value,fill = Age, group=primary)) +
+         geom_violin(aes(fill=NULL, group=NULL), col="grey", trim=F) +
+    geom_line(position = position_dodge(width=0.4), col = "lightgrey", lwd=0.5) +
+  geom_point(shape =21, position = position_dodge(width=0.4)) +
+  scale_fill_manual(values = c("white", "darkgrey")) +
+  labs(x ="day", y="A/Cal09 HAI titer") +
+  stat_pvalue_manual(hai.p.values, label = "p.signif", step.increase = c(0.1)) +
+  scale_y_continuous(trans = "log2", limits = c(1, 10000)) +
+
+  facet_grid(.~Age) +
+  theme_pubr(legend = "none") +
+  theme(strip.background = element_rect(fill = "NA")),
     
-    # gtable of a ggcyto plot
-    fig,
-    
-    labels = LETTERS[1:3],
-    rel_widths = c(3,2,2),
-    ncol = 3),
+    ### Day 7 ELISPOTS ###
+    ggboxplot(elispot, x = "Age", y = "ELISPOT_d7_HA..per.1e6.PBMC",
+          ylab = "HA ELISPOT d7 per 10<sup>6</sup> PBMC") + stat_compare_means(method ="wilcox", paired=F, comparisons = list(c(1,2))) + 
+      ylim(0,600) +
+      xlab(NULL)  + rotate_x_text() + 
+  theme(axis.title.y = ggtext::element_markdown()),
+ggboxplot(elispot, x = "Age", y = "ELISPOT_d7_Fluvax..per.1e6.PBMC",
+            ylab = "Fluvax d7 ELISPOT per 10<sup>6</sup> PBMC") + stat_compare_means(method ="wilcox", paired=F, comparisons = list(c(1,2))) + 
+  ylim(0,3000) +
+  xlab(NULL) + rotate_x_text() + 
+  theme(axis.title.y = ggtext::element_markdown()),
+    labels = LETTERS[1:4],
+    rel_widths = c(3,2,1.3,1.3),
+    ncol = 4),
   
   # ROW 2:
   plot_grid(
+    
+    # gtable of a ggcyto plot
+    fig,
+
     ## This is the HA % of live B cells.
     ##
     ggpaired(data.for.ggpaired1, cond1 = "d0", cond2 = "d42", facet.by = "age",
@@ -289,17 +374,17 @@ plot_grid(
   # UMAP both day 0 and day 42
   # Louvain clustering
   plotUMAP(sce, colour_by="clusters") + 
-    theme_pubr(legend = "right") + 
+    theme_pubr(legend = "top") + 
     guides(fill = guide_legend(title = "Louvain\ncluster",
-                               title.position = "top")) + 
+                               title.position = "left",ncol=2)) + 
     theme(legend.key.size = unit(0, 'lines'),
           legend.margin = margin(0,0,0,0, 'lines'),
           aspect.ratio = 1) + rotate_x_text(),
   
   
-  labels = LETTERS[4:5],
-  rel_widths = c(1,2),
-  ncol = 2),
+  labels = LETTERS[5:7],
+  rel_widths = c(1.5,2,2),
+  ncol = 3),
   
   # ROW 3:
   plot_grid(
@@ -375,29 +460,19 @@ plot_grid(
           legend.margin = margin(0,0,0,0, 'lines'),
           aspect.ratio = 1),
   
-  labels = LETTERS[7:10],
+  labels = LETTERS[9:12],
   ncol = 2),
   
-  labels = c(LETTERS[6], NULL),
+  labels = c(LETTERS[8], NULL),
   rel_widths = c(1,2),
   ncol = 2),
-  
-  ncol = 1)
+  ncol = 1, rel_heights = c(1.5,1.25,1.5))
 
 
 ```
 
 __Figure 1 – Single cell sequencing of haemagluttinin specific B cells to study the aged vaccine response__
 
-(A) Study design. Venepuncture performed on days 0 (just prior to immunization), 7 and 42. Peripheral blood mononuclear cells were isolated on the day of venepuncture and cryopreserved for later index sorting experiments.
-(B) Haemagglutinin inhibition (HAI) assay titers from days 0, 7 and 42 are shown for `r levels(ALFNA16$Age.Group)[1]` year old or `r levels(ALFNA16$Age.Group)[2]` year old volunteers as open or greyed circles respectively (n=10 in both groups).
-(C) Recombinant biotinylated haemagglutinin conjugated with streptavidin-PE or -APC allows the identification of haemagglutinin specific B cells. Gated on live, singlet CD19+ lymphocytes. Full gating strategy is shown in Supplementary Figure 1A.
-(D) The proportion of haemagglutinin binding B cells increases after vaccination, for both 22-36 year olds and 67-86 year olds. Proportion expressed as percentage of live B cells, that do not bind free streptavidin.
-(E) UMAP embedding of single cell RNA sequencing from A/Cal09-specific B cells, n=`r ncol(sce)` cells. UMAP projection based on the first 40 principal components using the features with the top 10% variance, after removal of low quality cells (Supplementary Figure 1) and size normalization by deconvolution. Louvain clustering reveals 5 clusters.
-(F) Cell identity assignment based on published transcriptional profiles of 29 human immune subsets including the following B cell subsets: IgD+CD27- ‘naive’, IgD+CD27+ ‘non-switched Bmem’, IgD-CD27+ ‘switched Bmem’, IgD-CD27- ‘IgD-CD27-’, IgD-CD27+CD38+ plasmablasts ‘PB’ and plasmacytoid DCs. The following numbers of cells were identified: naive `r summary(sce$labels=="Naive")[["TRUE"]]` cells; non-switched Bmem `r summary(sce$labels=="Non-switched Bmem")[["TRUE"]]` cells; Switched Bmem `r summary(sce$labels=="Switched Bmem")[["TRUE"]]` cells; IgD-CD27- Bmem `r summary(sce$labels=="IgD-CD27- Bmem")[["TRUE"]]` cells; Plasmablast
-`r summary(sce$labels=="Plasmablast")[["TRUE"]]` cells and plasmacytoid DC `r summary(sce$labels=="pDC")[["TRUE"]]` cell. No cells were defined as T cells or members of other lymphoid or myeloid lineages.
-(G-J) UMAP embedding as in (E), showing the logicle transformed index sort surface expression of IgD (G), CD27 (H), CD21 (I) and CD38 (J) proteins.
-In (B), _P_ values from paired Mann-Whitney tests (on log2 transformed data) are summarised: *P*>0.05 ns; 0.05>*P*>0.01 \*; 0.01>*P*<0.001 \*\*. In (D), samples from the same individual are indicated with a grey line and _P_ values shown are from a paired two-tailed Mann-Whitney test. In (G)-(J), the scales reflect the decimal log of the logicle transformed fluorescence intensity value.
 
 \newpage
 

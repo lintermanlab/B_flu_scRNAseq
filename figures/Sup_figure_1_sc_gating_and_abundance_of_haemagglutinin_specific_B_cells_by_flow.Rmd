@@ -2,7 +2,9 @@
 title: ""
 author: ""
 date: ""
-output: pdf_document
+output:
+  pdf_document:
+    keep_tex: no
 header-includes:
     - \pagenumbering{gobble}
 editor_options: 
@@ -10,8 +12,8 @@ editor_options:
 ---
 
 ```{r echo=F}
-Sys.setenv(PATH=paste(Sys.getenv("PATH"),
-                      "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
+# Sys.setenv(PATH=paste(Sys.getenv("PATH"),
+#                       "/bi/home/carre/texlive/2017/bin/x86_64-linux/",sep=":"))
 
 ```
 
@@ -23,14 +25,14 @@ knitr::opts_chunk$set(echo = F, tidy = T, warning = F, message = F, fig.width = 
 
 ```{r data_load}
 
-
-
+library(MultiAssayExperiment)
+library(SingleCellExperiment)
 library(tidyverse)
 library(ggpubr) # for themes for plots.
 
 
 load(file = "../cohort_2016_17/Concatenated_index_master_fcs_gated_in_FlowJo_2_table_output.RData")
-
+load(file = "../cohort_2016_17/data/SCE_QC_pass_finalised.RData")
 merged.data <- as_tibble(merged.data)
 
 ```
@@ -47,6 +49,22 @@ load(file = "../cohort_2016_17/Example_of_sc_sort_gating_from_665X_d42.RData")
 
 
 
+```
+
+```{r hai}
+load(file = "../cohort_2016_17/ALFNA16_MultiAssayExperiment.RData")
+hai.data <- wideFormat(ALFNA16[ , , 
+                                # select assays with names that match:
+                                # 'HAI'
+                                # which returns all data from these two assays at all available days.
+                                grepl(names(assays(ALFNA16)), pattern = "HAI") ],
+                      # Return ages as well:
+                       colDataCols = "Age.Group")
+
+
+hai.data <- as.data.frame(hai.data)
+
+hai.data <- hai.data %>% filter(primary %in% sce$PID)
 ```
 
 ```{r plots, fig.height=9}
@@ -75,9 +93,33 @@ data.for.ggpaired1 <- reshape2::dcast(
 
 
 cowplot::plot_grid(
+  
+  cowplot::plot_grid(
+  ggplot(data = 
+               hai.data %>%
+               dplyr::select(primary, Age.Group, 
+                             contains("HAI_d"), -contains("log2")) %>%
+         mutate(Age.Group=str_replace_all(Age.Group, c("young"="18-22yo", "old"="67-86yo"))) %>%
+               mutate("Age" = factor(paste0(Age.Group))) %>%
+               dplyr::select(-Age.Group) %>%
+               set_colnames(
+                 gsub(colnames(.), 
+                      pattern = "HAI_d|_titre", replacement = "")) %>%
+               reshape2::melt( id_vars = c(primary, Age)),
+       aes(x = Age, y=value,fill = Age, group=primary)) +
+         geom_violin(aes(fill=NULL), col="grey", trim=F) +
+  geom_point(shape =21, position = position_dodge(width=0.4)) +
+  scale_fill_manual(values = c("white", "darkgrey")) +
+  labs(x ="age", y="\nA/Cal09 HAI titer") +
+  stat_compare_means(method="wilcox", paired=F, comparisons=list(c(1,2))) +
+  scale_y_continuous(trans = "log2", limits = c(1, 10000)) +
+
+  facet_grid(.~variable) +
+  theme_pubr(legend = "none") +
+  theme(strip.background = element_rect(fill = "NA")), labels = "A"),
 
   
-  cowplot::plot_grid(p2, labels = "A"),
+  cowplot::plot_grid(p2, labels = "B"),
   
   cowplot::plot_grid(
   # HA positive B cells [% of B cells] days 0 vs 42
@@ -126,9 +168,9 @@ ggstripchart(merged.data, x = "age",
 
 
 
-ncol = 3, labels = LETTERS[2:4]),
+ncol = 3, labels = LETTERS[3:5]),
 
-ncol = 1, rel_heights = c(5,4))
+ncol = 1, rel_heights = c(2,5,4))
 
 ###
 # Fold expansion
@@ -150,11 +192,11 @@ tab <- merged.data %>%
 \newpage
 __Supplementary figure 1: Single cell sorting strategy for haemagglutinin specific B cells and abundance of haemagglutinin specific B cells__
 
-(A) Example flow sorting gating strategy on B cells. B cells were negatively separated from PBMC using magnetic sorting prior to flow sorting.
-(B) The proportion of haemagglutinin binding B cells (as % of live B cells), is not significantly different between age groups either before, or 6 weeks after TIV immunization.
-(C-D) The number of haemagglutinin binding B cells per 10^7^ PBMC analysed by age and days post vaccination.
-(D) The number of haemagglutinin binding B cells is higher in 22-36 year olds at day 42. The number of haemagglutinin binding B cells was calculated as in (C).
-In (B) and (D), the _P_ values shown are from an unpaired two-tailed Mann-Whitney test. In (C), samples from the same individual are indicated with a grey line. The _P_ values shown are from a paired two-tailed Mann-Whitney test.
+(B) Example flow sorting gating strategy on B cells. B cells were negatively separated from PBMC using magnetic sorting prior to flow sorting.
+(C) The proportion of haemagglutinin binding B cells (as % of live B cells), is not significantly different between age groups either before, or 6 weeks after TIV immunization.
+(D-E) The number of haemagglutinin binding B cells per 10^7^ PBMC analysed by age and days post vaccination.
+(E) The number of haemagglutinin binding B cells is higher in 22-36 year olds at day 42. The number of haemagglutinin binding B cells was calculated as in (C).
+In (C) and (E, the _P_ values shown are from an unpaired two-tailed Mann-Whitney test. In (D), samples from the same individual are indicated with a grey line. The _P_ values shown are from a paired two-tailed Mann-Whitney test.
 
 
 \newpage

@@ -2,7 +2,9 @@
 title: ""
 author: ""
 date: ""
-output: pdf_document
+output:
+  pdf_document:
+    keep_tex: no
 header-includes:
     - \pagenumbering{gobble}
 editor_options: 
@@ -1054,7 +1056,7 @@ cowplot::plot_grid(
             as.data.frame() %>%
             group_by(named_clusters, Isotype.Constant.group) %>%
             dplyr::summarise(n = n()) %>%
-            mutate(freq = n / sum(n)), 
+            dplyr::mutate(freq = n / sum(n)), 
           
           fill = "Isotype.Constant.group", 
           y = "freq", 
@@ -1091,7 +1093,7 @@ cowplot::plot_grid(
   
   # IGH V family usage PROPORTIONS at d42, faceted by UMAP cluster:
   ggbarplot(data = Vfam.clusters.prop %>% 
-              select(-clusters) %>% 
+              dplyr::select(-clusters) %>% 
               reshape2::melt(id.vars =c("named_clusters", "age")), 
             x = "named_clusters", y = "value",
             fill  = "variable",

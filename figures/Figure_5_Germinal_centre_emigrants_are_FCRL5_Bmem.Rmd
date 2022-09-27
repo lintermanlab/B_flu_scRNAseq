@@ -2,7 +2,9 @@
 title: ""
 author: ""
 date: ""
-output: pdf_document
+output:
+  pdf_document:
+    keep_tex: no
 header-includes:
     - \pagenumbering{gobble}
 editor_options: 
@@ -70,8 +72,8 @@ fna.umap <- fna.umap + theme_pubr(legend = "bottom") +
   theme(aspect.ratio = 1, legend.direction = "vertical",
         axis.ticks = element_blank(), axis.text = element_blank())
 #fna.umap
-
-
+fna.idents <- Idents(fna.B)
+save(fna.idents, file = "../Turner_dataset_reanalysis/R_results_objects/FNA_idents.RData")
 ```
 
 ```{r tracking_GC_clones}
@@ -227,7 +229,8 @@ GCoutput <- ggbarplot(data = reshape2::melt(celltypes), y = "value",x = "cell",
           fill = RColorBrewer::brewer.pal(4,"Set1")) + theme_pubr() +
   theme(axis.text.x = ggtext::element_markdown())
 
-
+pbmc.idents <- Idents(pbmc.B.labelled)
+save(pbmc.idents, file = "../Turner_dataset_reanalysis/R_results_objects/PBMC_idents.RData")
 ```
 
 ```{r multi_panel_figure}
